@@ -27,12 +27,7 @@ export default function Compressor() {
   const [compressedSize, setCompressedSize] = useState<number | null>(null);
   const [compressedBytes, setCompressedBytes] = useState<Uint8Array | null>(null);
   const [options, setOptions] = useState<CompressOptions>({
-    // Default scale = 1.0 so dimensions don't change. This is the safe path
-    // that never requires transform compensation — the output plays in every
-    // player exactly like the original, just with palette-compressed images.
-    // Users who want more aggressive shrinking can lower the slider, which
-    // shows a warning about player compatibility.
-    scale: 1.0,
+    scale: 0.75,
     quality: 0.8,
     format: "png",
     colors: 128,
