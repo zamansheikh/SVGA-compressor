@@ -199,3 +199,198 @@ export function imagesByteSize(movie: MovieFile): number {
   for (const k in movie.images) n += movie.images[k].byteLength;
   return n;
 }
+
+/* ----------------------------------------------------------------------------
+ * Sprite transform rescaling
+ *
+ * SVGA players render images at the bitmap's *native* dimensions and apply
+ * each frame's 2×3 affine transform to position/scale on-canvas. If we
+ * downscale a bitmap from W×H to (W·s)×(H·s), the player would render it at
+ * s× the intended size in the original transform's reference frame. We
+ * compensate by multiplying the transform's 2×2 portion (a, b, c, d) by 1/s
+ * so the output pixels end up exactly where the player originally expected.
+ *
+ * Translations (tx, ty), clip paths and shape layers are all in *output*
+ * coordinate space and are deliberately left untouched.
+ *
+ * Implementation is low-level so any unknown/private sprite fields pass
+ * through byte-for-byte.
+ * ------------------------------------------------------------------------- */
+
+export type ImageScale = { sx: number; sy: number };
+
+/**
+ * Rewrite every FrameEntity.transform inside a raw SpriteEntity byte stream,
+ * compensating for image rescaling. Every other field — imageKey, matteKey,
+ * layout, clipPath, shapes, and anything unknown — is preserved exactly.
+ *
+ * @param scaleMap per-imageKey actual scale factors
+ * @param fallback optional scale used when the sprite's imageKey doesn't
+ *                 resolve in scaleMap (common when an exporter uses image-map
+ *                 keys that don't byte-match the sprite's reference).
+ */
+export function rescaleSpriteTransforms(
+  spriteBytes: Uint8Array,
+  scaleMap: Map<string, ImageScale>,
+  fallback?: ImageScale,
+): Uint8Array {
+  // First pass: find the imageKey so we know which scale to apply.
+  const imageKey = readSpriteImageKey(spriteBytes);
+  const matchedKey =
+    scaleMap.has(imageKey)
+      ? imageKey
+      : scaleMap.has(imageKey.replace(/\.[^.]+$/, ""))
+        ? imageKey.replace(/\.[^.]+$/, "")
+        : scaleMap.has(imageKey + ".png")
+          ? imageKey + ".png"
+          : scaleMap.has(imageKey + ".webp")
+            ? imageKey + ".webp"
+            : scaleMap.has(imageKey + ".jpg")
+              ? imageKey + ".jpg"
+              : scaleMap.has(imageKey + ".jpeg")
+                ? imageKey + ".jpeg"
+                : null;
+  const scale = matchedKey ? scaleMap.get(matchedKey) : fallback;
+
+  // Dev-only trace so `scale < 1` experiments are debuggable from DevTools.
+  if (typeof window !== "undefined") {
+    // eslint-disable-next-line no-console
+    console.debug(
+      `[svga] sprite imageKey="${imageKey}" matched="${matchedKey ?? "(fallback)"}" scale=${
+        scale ? `${scale.sx.toFixed(3)}×${scale.sy.toFixed(3)}` : "none"
+      }`,
+    );
+  }
+
+  if (!scale || (scale.sx === 1 && scale.sy === 1)) return spriteBytes;
+
+  const invSx = 1 / scale.sx;
+  const invSy = 1 / scale.sy;
+
+  const reader = Reader.create(spriteBytes);
+  const writer = Writer.create();
+
+  while (reader.pos < reader.len) {
+    const tag = reader.uint32();
+    const fieldNum = tag >>> 3;
+    const wireType = tag & 7;
+
+    if (fieldNum === 2 && wireType === 2) {
+      // FrameEntity — patch its transform and re-emit.
+      const frameBytes = reader.bytes();
+      const rewritten = rewriteFrame(toStandalone(frameBytes), invSx, invSy);
+      writer.uint32(tag).bytes(rewritten);
+    } else if (wireType === 2) {
+      // imageKey, matteKey, or unknown length-delimited field — pass through.
+      writer.uint32(tag).bytes(reader.bytes());
+    } else if (wireType === 0) {
+      writer.uint32(tag).int64(reader.int64());
+    } else if (wireType === 1) {
+      writer.uint32(tag).fixed64(reader.fixed64());
+    } else if (wireType === 5) {
+      writer.uint32(tag).fixed32(reader.fixed32());
+    } else {
+      reader.skipType(wireType);
+    }
+  }
+
+  return writer.finish();
+}
+
+function readSpriteImageKey(spriteBytes: Uint8Array): string {
+  const r = Reader.create(spriteBytes);
+  while (r.pos < r.len) {
+    const tag = r.uint32();
+    const f = tag >>> 3;
+    const wt = tag & 7;
+    if (f === 1 && wt === 2) return r.string();
+    r.skipType(wt);
+  }
+  return "";
+}
+
+function rewriteFrame(frameBytes: Uint8Array, invSx: number, invSy: number): Uint8Array {
+  const reader = Reader.create(frameBytes);
+  const writer = Writer.create();
+
+  while (reader.pos < reader.len) {
+    const tag = reader.uint32();
+    const fieldNum = tag >>> 3;
+    const wireType = tag & 7;
+
+    if (fieldNum === 3 && wireType === 2) {
+      // Transform — read 6 floats, scale 2×2, re-emit.
+      const tBytes = reader.bytes();
+      writer.uint32(tag).bytes(rewriteTransform(toStandalone(tBytes), invSx, invSy));
+    } else if (wireType === 2) {
+      // layout, clipPath, shapes, or unknown — pass through.
+      writer.uint32(tag).bytes(reader.bytes());
+    } else if (wireType === 0) {
+      writer.uint32(tag).int64(reader.int64());
+    } else if (wireType === 1) {
+      writer.uint32(tag).fixed64(reader.fixed64());
+    } else if (wireType === 5) {
+      // alpha (fixed32 float) — preserve exact bit pattern.
+      writer.uint32(tag).fixed32(reader.fixed32());
+    } else {
+      reader.skipType(wireType);
+    }
+  }
+
+  return writer.finish();
+}
+
+function rewriteTransform(
+  transformBytes: Uint8Array,
+  invSx: number,
+  invSy: number,
+): Uint8Array {
+  // proto3 scalar defaults are 0.
+  let a = 0, b = 0, c = 0, d = 0, tx = 0, ty = 0;
+  const reader = Reader.create(transformBytes);
+  while (reader.pos < reader.len) {
+    const tag = reader.uint32();
+    const fieldNum = tag >>> 3;
+    const wireType = tag & 7;
+    if (wireType === 5) {
+      const v = reader.float();
+      if (fieldNum === 1) a = v;
+      else if (fieldNum === 2) b = v;
+      else if (fieldNum === 3) c = v;
+      else if (fieldNum === 4) d = v;
+      else if (fieldNum === 5) tx = v;
+      else if (fieldNum === 6) ty = v;
+    } else {
+      reader.skipType(wireType);
+    }
+  }
+
+  // Matrix applied as: x' = a·x + c·y + tx  /  y' = b·x + d·y + ty
+  // Shrinking the source bitmap by (sx, sy) means new source coords relate
+  // to old by x_old = x_new / sx, so the equivalent output-preserving matrix
+  // has each column scaled by 1/sx (x-column: a, b) and 1/sy (y-column: c, d).
+  a *= invSx;
+  b *= invSx;
+  c *= invSy;
+  d *= invSy;
+
+  const w = Writer.create();
+  w.uint32((1 << 3) | 5).float(a);
+  w.uint32((2 << 3) | 5).float(b);
+  w.uint32((3 << 3) | 5).float(c);
+  w.uint32((4 << 3) | 5).float(d);
+  w.uint32((5 << 3) | 5).float(tx);
+  w.uint32((6 << 3) | 5).float(ty);
+  return w.finish();
+}
+
+/**
+ * protobufjs `Reader.bytes()` returns a subarray view. Copy it into a fresh
+ * buffer so `Reader.create` on the result works independently of how the
+ * original buffer gets aliased later.
+ */
+function toStandalone(view: Uint8Array): Uint8Array {
+  const out = new Uint8Array(view.byteLength);
+  out.set(view);
+  return out;
+}

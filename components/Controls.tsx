@@ -102,7 +102,7 @@ export default function Controls({ value, onChange, disabled }: Props) {
       <div>
         <div className="flex items-baseline justify-between">
           <label htmlFor="scale" className="text-sm font-medium text-white/80">
-            Scale
+            Scale <span className="text-[10px] uppercase tracking-wider text-white/40 ml-1">advanced</span>
           </label>
           <span className="text-xs font-mono text-white/60 tabular-nums">
             {Math.round(value.scale * 100)}%
@@ -120,8 +120,19 @@ export default function Controls({ value, onChange, disabled }: Props) {
           className="mt-2"
         />
         <p className="mt-1.5 text-[11px] text-white/40">
-          Resamples each bitmap. 50% gives ~4× smaller pixels.
+          100% keeps bitmap dimensions unchanged — safe for every player.
+          Anything lower resamples each bitmap (50% ≈ 4× fewer pixels).
         </p>
+        {value.scale < 1 && (
+          <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200 leading-relaxed">
+            <span className="font-semibold">Heads up:</span>{" "}
+            Scaling changes bitmap dimensions. We rewrite each sprite's transform
+            matrix to compensate, but some SVGA player builds render sprites at
+            the wrong size or position after this change. If your player shows
+            sprites off-center or undersized, keep scale at 100% and rely on PNG
+            palette for compression instead.
+          </div>
+        )}
       </div>
     </div>
   );

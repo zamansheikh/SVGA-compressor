@@ -142,16 +142,12 @@ export async function createRendererFromMovie(
         if (p) ctx.clip(p);
       }
 
-      const w =
-        frame.layout.width > 0
-          ? frame.layout.width
-          : (img as ImageBitmap).width;
-      const h =
-        frame.layout.height > 0
-          ? frame.layout.height
-          : (img as ImageBitmap).height;
+      // Match real SVGA players (Web/Android/iOS): draw at the bitmap's
+      // native size and rely entirely on the transform matrix for sizing.
+      // Using layout.width/height here would double-scale after compression,
+      // diverging from how the downloaded file actually renders in players.
       try {
-        ctx.drawImage(img as CanvasImageSource, 0, 0, w, h);
+        ctx.drawImage(img as CanvasImageSource, 0, 0);
       } catch {
         /* closed bitmap / cross-origin edge cases */
       }
