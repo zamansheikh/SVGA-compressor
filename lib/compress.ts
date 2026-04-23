@@ -1,5 +1,6 @@
 "use client";
 
+import UPNG from "upng-js";
 import { sniffImageMime, type MovieFile } from "./svga";
 
 export type CompressOptions = {
@@ -9,6 +10,11 @@ export type CompressOptions = {
   quality: number;
   /** Output format for embedded bitmaps. */
   format: "webp" | "png" | "jpeg";
+  /**
+   * PNG palette size: 0 = lossless 24-bit PNG, 1..256 = indexed palette
+   * (smaller, slight visible quality loss). Only applies when format === "png".
+   */
+  colors: number;
 };
 
 export type CompressProgress = (done: number, total: number, label: string) => void;
@@ -30,7 +36,7 @@ export async function compressMovieImages(
     const srcMime = sniffImageMime(srcBytes);
 
     if (srcMime === "application/octet-stream") {
-      // Not a recognized bitmap — keep as-is (e.g. audio tracks live here sometimes).
+      // Not a recognized bitmap (e.g. audio payload) — keep as-is.
       out[key] = srcBytes;
       continue;
     }
@@ -40,7 +46,6 @@ export async function compressMovieImages(
       // Safety valve: if re-encoding made the image *larger*, keep the original.
       out[key] = recoded.byteLength < srcBytes.byteLength ? recoded : srcBytes;
     } catch {
-      // If canvas fails for any reason, keep the original so the animation still plays.
       out[key] = srcBytes;
     }
   }
@@ -53,7 +58,7 @@ export async function compressMovieImages(
 async function recodeBitmap(
   bytes: Uint8Array,
   mime: string,
-  { scale, quality, format }: CompressOptions,
+  { scale, quality, format, colors }: CompressOptions,
 ): Promise<Uint8Array> {
   const blob = new Blob([bytes as BlobPart], { type: mime });
   const bmp = await createImageBitmapSafe(blob);
@@ -81,21 +86,28 @@ async function recodeBitmap(
   ctx.drawImage(bmp, 0, 0, w, h);
   bmp.close?.();
 
-  const outMime =
-    format === "png" ? "image/png" : format === "jpeg" ? "image/jpeg" : "image/webp";
+  if (format === "png") {
+    // UPNG produces a real compressed PNG: 24-bit lossless (colors=0) or
+    // palette (colors=1..256) with alpha. Much smaller than canvas.toBlob.
+    const imageData = ctx.getImageData(0, 0, w, h);
+    const cnum = Math.max(0, Math.min(256, Math.round(colors)));
+    const ab = UPNG.encode([imageData.data.buffer as ArrayBuffer], w, h, cnum);
+    return new Uint8Array(ab);
+  }
 
+  const outMime = format === "jpeg" ? "image/jpeg" : "image/webp";
   let outBlob: Blob;
   if ("convertToBlob" in canvas) {
     outBlob = await (canvas as OffscreenCanvas).convertToBlob({
       type: outMime,
-      quality: format === "png" ? undefined : quality,
+      quality,
     });
   } else {
     outBlob = await new Promise<Blob>((resolve, reject) => {
       (canvas as HTMLCanvasElement).toBlob(
         (b) => (b ? resolve(b) : reject(new Error("toBlob returned null"))),
         outMime,
-        format === "png" ? undefined : quality,
+        quality,
       );
     });
   }
@@ -104,14 +116,8 @@ async function recodeBitmap(
 
 async function createImageBitmapSafe(blob: Blob): Promise<ImageBitmap> {
   if (typeof createImageBitmap !== "undefined") {
-    try {
-      return await createImageBitmap(blob);
-    } catch {
-      // fall through to image element
-    }
+    return createImageBitmap(blob);
   }
-  // Fallback: HTMLImageElement → ImageBitmap-like wrapper isn't straightforward,
-  // so we rethrow and callers will keep the original bytes.
   throw new Error("createImageBitmap not available");
 }
 

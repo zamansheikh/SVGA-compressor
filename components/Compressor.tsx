@@ -28,8 +28,9 @@ export default function Compressor() {
   const [compressedBytes, setCompressedBytes] = useState<Uint8Array | null>(null);
   const [options, setOptions] = useState<CompressOptions>({
     scale: 0.75,
-    quality: 0.75,
-    format: "webp",
+    quality: 0.8,
+    format: "png",
+    colors: 128,
   });
   const [working, setWorking] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
