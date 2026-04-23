@@ -14,15 +14,15 @@ import {
   decodeSvga,
   encodeSvga,
   imagesByteSize,
-  type MovieEntity,
+  type MovieFile,
 } from "@/lib/svga";
 
 type Progress = { done: number; total: number; label: string };
 
 export default function Compressor() {
   const [file, setFile] = useState<File | null>(null);
-  const [originalMovie, setOriginalMovie] = useState<MovieEntity | null>(null);
-  const [compressedMovie, setCompressedMovie] = useState<MovieEntity | null>(null);
+  const [originalMovie, setOriginalMovie] = useState<MovieFile | null>(null);
+  const [compressedMovie, setCompressedMovie] = useState<MovieFile | null>(null);
   const [originalSize, setOriginalSize] = useState<number | null>(null);
   const [compressedSize, setCompressedSize] = useState<number | null>(null);
   const [compressedBytes, setCompressedBytes] = useState<Uint8Array | null>(null);

@@ -1,16 +1,16 @@
-// Minimal SVGA 2.0 protobuf schema (source of truth: github.com/svga/SVGA-Format).
-// We embed the schema as a string so protobufjs can parse it at runtime — no codegen step.
-
-export const SVGA_PROTO = `
+/**
+ * Minimal sprite schema used ONLY by the preview renderer.
+ *
+ * We deliberately omit `ShapeEntity` and the `shapes` field on FrameEntity —
+ * real-world SVGA files have exporter-specific variations in shape encoding
+ * that can desync a strict decoder. protobufjs treats the omitted field 5 as
+ * an unknown length-delimited field and safely skips it, which means frames
+ * still decode even when their shape list is exotic. The renderer doesn't
+ * draw shape layers anyway.
+ */
+export const SVGA_SPRITE_PROTO = `
 syntax = "proto3";
 package com.opensource.svga;
-
-message MovieParams {
-  float viewBoxWidth = 1;
-  float viewBoxHeight = 2;
-  float fps = 3;
-  int32 frames = 4;
-}
 
 message Layout {
   float x = 1;
@@ -28,74 +28,17 @@ message Transform {
   float ty = 6;
 }
 
-message ShapeEntity {
-  enum ShapeType {
-    SHAPE = 0;
-    RECT = 1;
-    ELLIPSE = 2;
-    KEEP = 3;
-  }
-
-  message ShapeArgs { string d = 1; }
-  message RectArgs {
-    float x = 1; float y = 2; float width = 3; float height = 4; float cornerRadius = 5;
-  }
-  message EllipseArgs {
-    float x = 1; float y = 2; float radiusX = 3; float radiusY = 4;
-  }
-  message ShapeStyle {
-    message RGBAColor { float r = 1; float g = 2; float b = 3; float a = 4; }
-    enum LineCap { LineCap_BUTT = 0; LineCap_ROUND = 1; LineCap_SQUARE = 2; }
-    enum LineJoin { LineJoin_MITER = 0; LineJoin_ROUND = 1; LineJoin_BEVEL = 2; }
-    RGBAColor fill = 1;
-    RGBAColor stroke = 2;
-    float strokeWidth = 3;
-    LineCap lineCap = 4;
-    LineJoin lineJoin = 5;
-    float miterLimit = 6;
-    float lineDashI = 7;
-    float lineDashII = 8;
-    float lineDashIII = 9;
-  }
-
-  ShapeType type = 1;
-  ShapeStyle styles = 2;
-  Transform transform = 3;
-
-  oneof args {
-    ShapeArgs shape = 4;
-    RectArgs rect = 5;
-    EllipseArgs ellipse = 6;
-  }
-}
-
 message FrameEntity {
   float alpha = 1;
   Layout layout = 2;
   Transform transform = 3;
   string clipPath = 4;
-  repeated ShapeEntity shapes = 5;
+  // field 5 (shapes) intentionally omitted — skipped as unknown.
 }
 
 message SpriteEntity {
   string imageKey = 1;
   repeated FrameEntity frames = 2;
   string matteKey = 3;
-}
-
-message AudioEntity {
-  string audioKey = 1;
-  int32 startFrame = 2;
-  int32 endFrame = 3;
-  int32 startTime = 4;
-  int32 totalTime = 5;
-}
-
-message MovieEntity {
-  string version = 1;
-  MovieParams params = 2;
-  map<string, bytes> images = 3;
-  repeated SpriteEntity sprites = 4;
-  repeated AudioEntity audios = 5;
 }
 `;

@@ -1,6 +1,8 @@
 "use client";
 
-import { decodeSvga, sniffImageMime, type MovieEntity } from "./svga";
+import protobuf from "protobufjs";
+import { decodeSvga, sniffImageMime, type MovieFile } from "./svga";
+import { SVGA_SPRITE_PROTO } from "./svga-proto";
 
 type Frame = {
   alpha: number;
@@ -30,7 +32,17 @@ export type Renderer = {
   destroy: () => void;
 };
 
-/** Decode an .svga Uint8Array and create a canvas renderer. */
+let spriteTypePromise: Promise<protobuf.Type> | null = null;
+function getSpriteType(): Promise<protobuf.Type> {
+  if (!spriteTypePromise) {
+    spriteTypePromise = Promise.resolve().then(() => {
+      const { root } = protobuf.parse(SVGA_SPRITE_PROTO, { keepCase: true });
+      return root.lookupType("com.opensource.svga.SpriteEntity");
+    });
+  }
+  return spriteTypePromise;
+}
+
 export async function createRenderer(
   bytes: Uint8Array,
   canvas: HTMLCanvasElement,
@@ -40,10 +52,26 @@ export async function createRenderer(
 }
 
 export async function createRendererFromMovie(
-  movie: MovieEntity,
+  movie: MovieFile,
   canvas: HTMLCanvasElement,
 ): Promise<Renderer> {
   const { viewBoxWidth, viewBoxHeight, fps, frames } = movie.params;
+
+  // Decode each sprite individually so one bad sprite doesn't kill the whole preview.
+  const SpriteType = await getSpriteType();
+  const sprites: Sprite[] = [];
+  for (const raw of movie.spriteBytes) {
+    try {
+      const msg = SpriteType.decode(raw);
+      const obj = SpriteType.toObject(msg, { defaults: true }) as {
+        imageKey?: string;
+        frames?: Frame[];
+      };
+      sprites.push(normalizeSprite(obj));
+    } catch {
+      // Skip sprites that don't match our minimal schema; preview still renders the rest.
+    }
+  }
 
   // Load images
   const imageMap = new Map<string, ImageBitmap | HTMLImageElement>();
@@ -55,6 +83,8 @@ export async function createRendererFromMovie(
       try {
         const bmp = await createImageBitmap(blob);
         imageMap.set(key, bmp);
+        const stripped = key.replace(/\.[^.]+$/, "");
+        if (stripped !== key && !imageMap.has(stripped)) imageMap.set(stripped, bmp);
       } catch {
         const img = new Image();
         img.src = URL.createObjectURL(blob);
@@ -63,41 +93,19 @@ export async function createRendererFromMovie(
           img.onerror = () => rej(new Error(`Failed to load image ${key}`));
         });
         imageMap.set(key, img);
-        // Normalize: some SVGAs reference an imageKey with an extension suffix; also expose a stripped key
         const stripped = key.replace(/\.[^.]+$/, "");
         if (stripped !== key && !imageMap.has(stripped)) imageMap.set(stripped, img);
       }
     }),
   );
 
-  // Normalize sprite list
-  const sprites: Sprite[] = (movie.sprites as unknown as Sprite[]).map((s) => ({
-    imageKey: s.imageKey,
-    frames: (s.frames ?? []).map((f) => ({
-      alpha: f?.alpha ?? 0,
-      transform: {
-        a: f?.transform?.a ?? 1,
-        b: f?.transform?.b ?? 0,
-        c: f?.transform?.c ?? 0,
-        d: f?.transform?.d ?? 1,
-        tx: f?.transform?.tx ?? 0,
-        ty: f?.transform?.ty ?? 0,
-      },
-      layout: {
-        x: f?.layout?.x ?? 0,
-        y: f?.layout?.y ?? 0,
-        width: f?.layout?.width ?? 0,
-        height: f?.layout?.height ?? 0,
-      },
-      clipPath: f?.clipPath ?? "",
-    })),
-  }));
-
-  // Size canvas to device pixel ratio
+  // Fit canvas to device pixel ratio. Guard against zero-size viewBox.
+  const safeW = viewBoxWidth > 0 ? viewBoxWidth : 300;
+  const safeH = viewBoxHeight > 0 ? viewBoxHeight : 300;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  canvas.width = Math.max(1, Math.round(viewBoxWidth * dpr));
-  canvas.height = Math.max(1, Math.round(viewBoxHeight * dpr));
-  canvas.style.aspectRatio = `${viewBoxWidth} / ${viewBoxHeight}`;
+  canvas.width = Math.max(1, Math.round(safeW * dpr));
+  canvas.height = Math.max(1, Math.round(safeH * dpr));
+  canvas.style.aspectRatio = `${safeW} / ${safeH}`;
 
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not obtain 2D canvas context");
@@ -108,16 +116,20 @@ export async function createRendererFromMovie(
   let lastTs = 0;
   let rafId = 0;
 
+  const totalFrames = Math.max(1, frames);
   const frameInterval = 1000 / Math.max(1, fps || 24);
 
   function draw(frameIdx: number) {
     if (!ctx) return;
-    ctx.clearRect(0, 0, viewBoxWidth, viewBoxHeight);
+    ctx.clearRect(0, 0, safeW, safeH);
 
     for (const sprite of sprites) {
       const frame = sprite.frames[frameIdx];
       if (!frame || frame.alpha <= 0) continue;
-      const img = imageMap.get(sprite.imageKey) ?? imageMap.get(sprite.imageKey.replace(/\.[^.]+$/, ""));
+
+      const img =
+        imageMap.get(sprite.imageKey) ??
+        imageMap.get(sprite.imageKey.replace(/\.[^.]+$/, ""));
       if (!img) continue;
 
       ctx.save();
@@ -130,12 +142,18 @@ export async function createRendererFromMovie(
         if (p) ctx.clip(p);
       }
 
-      const w = frame.layout.width || (img as ImageBitmap).width;
-      const h = frame.layout.height || (img as ImageBitmap).height;
+      const w =
+        frame.layout.width > 0
+          ? frame.layout.width
+          : (img as ImageBitmap).width;
+      const h =
+        frame.layout.height > 0
+          ? frame.layout.height
+          : (img as ImageBitmap).height;
       try {
         ctx.drawImage(img as CanvasImageSource, 0, 0, w, h);
       } catch {
-        /* drawImage can throw if image bitmap was closed */
+        /* closed bitmap / cross-origin edge cases */
       }
       ctx.restore();
     }
@@ -147,7 +165,7 @@ export async function createRendererFromMovie(
     const elapsed = ts - lastTs;
     if (elapsed >= frameInterval) {
       const steps = Math.floor(elapsed / frameInterval);
-      currentFrame = (currentFrame + steps) % frames;
+      currentFrame = (currentFrame + steps) % totalFrames;
       draw(currentFrame);
       api.onFrame?.(currentFrame);
       lastTs = ts - (elapsed % frameInterval);
@@ -155,15 +173,14 @@ export async function createRendererFromMovie(
     rafId = requestAnimationFrame(tick);
   }
 
-  // initial paint
   draw(0);
 
   const api: Renderer = {
     canvas,
-    width: viewBoxWidth,
-    height: viewBoxHeight,
+    width: safeW,
+    height: safeH,
     fps,
-    totalFrames: frames,
+    totalFrames,
     play() {
       if (playing) return;
       playing = true;
@@ -181,7 +198,7 @@ export async function createRendererFromMovie(
       return playing;
     },
     seek(f: number) {
-      currentFrame = Math.max(0, Math.min(frames - 1, Math.floor(f)));
+      currentFrame = Math.max(0, Math.min(totalFrames - 1, Math.floor(f)));
       draw(currentFrame);
       api.onFrame?.(currentFrame);
     },
@@ -198,10 +215,32 @@ export async function createRendererFromMovie(
   return api;
 }
 
-// Minimal SVG-path parser for clipPath support (handles M, L, C, Q, Z, H, V — the SVGA subset).
+function normalizeSprite(obj: { imageKey?: string; frames?: Frame[] }): Sprite {
+  return {
+    imageKey: obj.imageKey ?? "",
+    frames: (obj.frames ?? []).map((f) => ({
+      alpha: f?.alpha ?? 0,
+      transform: {
+        a: f?.transform?.a ?? 1,
+        b: f?.transform?.b ?? 0,
+        c: f?.transform?.c ?? 0,
+        d: f?.transform?.d ?? 1,
+        tx: f?.transform?.tx ?? 0,
+        ty: f?.transform?.ty ?? 0,
+      },
+      layout: {
+        x: f?.layout?.x ?? 0,
+        y: f?.layout?.y ?? 0,
+        width: f?.layout?.width ?? 0,
+        height: f?.layout?.height ?? 0,
+      },
+      clipPath: f?.clipPath ?? "",
+    })),
+  };
+}
+
 function parseSvgPath(d: string): Path2D | null {
   try {
-    // Browsers accept Path2D directly from an SVG-path string.
     return new Path2D(d);
   } catch {
     return null;

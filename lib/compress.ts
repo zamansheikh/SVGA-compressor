@@ -1,6 +1,6 @@
 "use client";
 
-import { sniffImageMime, type MovieEntity } from "./svga";
+import { sniffImageMime, type MovieFile } from "./svga";
 
 export type CompressOptions = {
   /** 0.01..1 — scale factor applied to embedded bitmaps. */
@@ -13,12 +13,12 @@ export type CompressOptions = {
 
 export type CompressProgress = (done: number, total: number, label: string) => void;
 
-/** Re-encode every embedded image in a MovieEntity using the browser canvas. */
+/** Re-encode every embedded image in a MovieFile using the browser canvas. */
 export async function compressMovieImages(
-  movie: MovieEntity,
+  movie: MovieFile,
   opts: CompressOptions,
   onProgress?: CompressProgress,
-): Promise<MovieEntity> {
+): Promise<MovieFile> {
   const keys = Object.keys(movie.images);
   const out: Record<string, Uint8Array> = {};
 
@@ -55,7 +55,7 @@ async function recodeBitmap(
   mime: string,
   { scale, quality, format }: CompressOptions,
 ): Promise<Uint8Array> {
-  const blob = new Blob([bytes], { type: mime });
+  const blob = new Blob([bytes as BlobPart], { type: mime });
   const bmp = await createImageBitmapSafe(blob);
 
   const w = Math.max(1, Math.round(bmp.width * scale));

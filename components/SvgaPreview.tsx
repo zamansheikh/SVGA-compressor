@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createRendererFromMovie, type Renderer } from "@/lib/renderer";
-import type { MovieEntity } from "@/lib/svga";
+import type { MovieFile } from "@/lib/svga";
 
 type Props = {
-  movie: MovieEntity | null;
+  movie: MovieFile | null;
   label: string;
   accent?: "brand" | "violet";
 };
