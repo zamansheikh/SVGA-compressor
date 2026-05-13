@@ -117,6 +117,7 @@ export default function SvgaPreview({
               viewboxHeight={movie.params.viewBoxHeight}
               config={watermark}
               onChange={onWatermarkChange}
+              currentFrame={frame}
             />
           )}
         </div>

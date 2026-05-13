@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   clampToViewbox,
+  computeAnimationState,
+  IDENTITY_ANIM_STATE,
   renderWatermarkPng,
   resolveWatermarkPosition,
   type WatermarkConfig,
@@ -15,6 +17,8 @@ type Props = {
   viewboxHeight: number;
   config: WatermarkConfig;
   onChange: (next: WatermarkConfig) => void;
+  /** Current playback frame index — used to drive the live animation. */
+  currentFrame?: number;
 };
 
 export default function WatermarkOverlay({
@@ -23,6 +27,7 @@ export default function WatermarkOverlay({
   viewboxHeight,
   config,
   onChange,
+  currentFrame = 0,
 }: Props) {
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [dims, setDims] = useState<WatermarkDimensions | null>(null);
@@ -99,6 +104,8 @@ export default function WatermarkOverlay({
     return rect.width / viewboxWidth;
   }, [rect, viewboxWidth]);
 
+  const [isDragging, setIsDragging] = useState(false);
+
   if (!config.enabled || !rect || !dims || scale === 0) return null;
 
   const { x: vbX, y: vbY } = resolveWatermarkPosition(
@@ -108,10 +115,23 @@ export default function WatermarkOverlay({
     viewboxHeight,
   );
 
-  const left = vbX * scale;
-  const top = vbY * scale;
+  // Pause the animation while the user is positioning the watermark, so the
+  // drag math stays linear and predictable.
+  const animState = isDragging
+    ? IDENTITY_ANIM_STATE
+    : computeAnimationState(
+        config.animation,
+        currentFrame,
+        dims,
+        { x: vbX, y: vbY },
+        { width: viewboxWidth, height: viewboxHeight },
+      );
+
+  const left = (vbX + animState.offsetX) * scale;
+  const top = (vbY + animState.offsetY) * scale;
   const width = dims.width * scale;
   const height = dims.height * scale;
+  const rotationDeg = (animState.rotation * 180) / Math.PI;
 
   function commitMove(viewboxX: number, viewboxY: number) {
     if (!dims) return;
@@ -129,6 +149,7 @@ export default function WatermarkOverlay({
       startX: vbX,
       startY: vbY,
     };
+    setIsDragging(true);
     overlayRef.current?.focus();
   }
 
@@ -144,6 +165,7 @@ export default function WatermarkOverlay({
     if (dragState.current) {
       (e.target as HTMLElement).releasePointerCapture(e.pointerId);
       dragState.current = null;
+      setIsDragging(false);
     }
   }
 
@@ -171,14 +193,17 @@ export default function WatermarkOverlay({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
       onKeyDown={onKeyDown}
-      className="absolute select-none cursor-move outline-none ring-2 ring-brand-400/40 hover:ring-brand-400/80 focus:ring-brand-300 transition"
+      className="absolute select-none cursor-move outline-none ring-2 ring-brand-400/40 hover:ring-brand-400/80 focus:ring-brand-300"
       style={{
         left,
         top,
         width,
         height,
-        opacity: config.opacity,
+        opacity: config.opacity * animState.alphaMultiplier,
+        transform: `rotate(${rotationDeg}deg) scale(${animState.scale})`,
+        transformOrigin: "center center",
         touchAction: "none",
+        willChange: "transform, opacity, left, top",
       }}
     >
       {bitmapUrl && (

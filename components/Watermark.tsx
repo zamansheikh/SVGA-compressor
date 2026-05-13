@@ -8,6 +8,8 @@ import {
   type TextBackground,
   type TextShadow,
   type TextWatermark,
+  type WatermarkAnimation,
+  type WatermarkAnimationType,
   type WatermarkConfig,
 } from "@/lib/watermark";
 
@@ -135,6 +137,140 @@ export default function Watermark({ value, onChange, disabled }: Props) {
             suffix="%"
             disabled={disabled}
           />
+
+          <AnimationControls
+            value={value.animation}
+            onChange={(a) => onChange({ ...value, animation: a })}
+            disabled={disabled}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Animation                                                            */
+/* ------------------------------------------------------------------ */
+
+type AnimOption = { value: WatermarkAnimationType; label: string; group?: string };
+
+const ANIMATION_OPTIONS: AnimOption[] = [
+  { value: "none", label: "None" },
+  // Stays at its position — no translation, no rotation.
+  { value: "fadeIn", label: "Fade in", group: "In place" },
+  { value: "fadeOut", label: "Fade out", group: "In place" },
+  { value: "pulse", label: "Pulse", group: "In place" },
+  { value: "glow", label: "Glow", group: "In place" },
+  { value: "blink", label: "Blink", group: "In place" },
+  { value: "flash", label: "Flash", group: "In place" },
+  { value: "heartbeat", label: "Heartbeat", group: "In place" },
+  { value: "strobe", label: "Strobe", group: "In place" },
+  { value: "twinkle", label: "Twinkle", group: "In place" },
+  { value: "scalePulse", label: "Scale pulse", group: "In place" },
+  // Translate or rotate the watermark.
+  { value: "slideInLeft", label: "Slide in ← left", group: "Motion" },
+  { value: "slideInRight", label: "Slide in → right", group: "Motion" },
+  { value: "slideInTop", label: "Slide in ↓ top", group: "Motion" },
+  { value: "slideInBottom", label: "Slide in ↑ bottom", group: "Motion" },
+  { value: "bounce", label: "Bounce", group: "Motion" },
+  { value: "spin", label: "Spin", group: "Motion" },
+];
+
+const LOOPABLE: WatermarkAnimationType[] = [
+  "pulse",
+  "glow",
+  "blink",
+  "flash",
+  "heartbeat",
+  "strobe",
+  "twinkle",
+  "bounce",
+  "spin",
+  "scalePulse",
+];
+
+function AnimationControls({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: WatermarkAnimation;
+  onChange: (v: WatermarkAnimation) => void;
+  disabled?: boolean;
+}) {
+  const showsLoop = LOOPABLE.includes(value.type);
+  const inactive = value.type === "none";
+
+  return (
+    <div className="border-t border-white/5 pt-4 space-y-3">
+      <div>
+        <label className="block text-sm font-medium text-white/80 mb-1.5" htmlFor="wm-anim">
+          Animation
+        </label>
+        <select
+          id="wm-anim"
+          value={value.type}
+          onChange={(e) =>
+            onChange({ ...value, type: e.target.value as WatermarkAnimationType })
+          }
+          disabled={disabled}
+          className="w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+        >
+          <option value="none" className="bg-[#0b1024]">
+            None
+          </option>
+          <optgroup label="In place — no movement" className="bg-[#0b1024]">
+            {ANIMATION_OPTIONS.filter((o) => o.group === "In place").map((o) => (
+              <option key={o.value} value={o.value} className="bg-[#0b1024]">
+                {o.label}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Motion" className="bg-[#0b1024]">
+            {ANIMATION_OPTIONS.filter((o) => o.group === "Motion").map((o) => (
+              <option key={o.value} value={o.value} className="bg-[#0b1024]">
+                {o.label}
+              </option>
+            ))}
+          </optgroup>
+        </select>
+      </div>
+
+      {!inactive && (
+        <>
+          <Slider
+            label="Duration"
+            value={value.duration}
+            onChange={(n) => onChange({ ...value, duration: n })}
+            min={1}
+            max={120}
+            step={1}
+            suffix="f"
+            disabled={disabled}
+          />
+          <Slider
+            label="Delay"
+            value={value.delay}
+            onChange={(n) => onChange({ ...value, delay: n })}
+            min={0}
+            max={120}
+            step={1}
+            suffix="f"
+            disabled={disabled}
+          />
+          {showsLoop && (
+            <Checkbox
+              label="Loop for whole animation"
+              checked={value.loop}
+              onChange={(b) => onChange({ ...value, loop: b })}
+              disabled={disabled}
+            />
+          )}
+          <p className="text-[11px] text-white/40 leading-relaxed">
+            Durations are in <span className="font-mono">frames</span> of the
+            host SVGA — at 20 fps, 24 frames ≈ 1.2 seconds.
+          </p>
         </>
       )}
     </div>

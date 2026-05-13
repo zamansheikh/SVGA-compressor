@@ -58,6 +58,35 @@ export type ImageWatermark = {
   widthFraction: number;
 };
 
+export type WatermarkAnimationType =
+  | "none"
+  | "fadeIn"
+  | "fadeOut"
+  | "pulse"
+  | "blink"
+  | "glow"
+  | "flash"
+  | "heartbeat"
+  | "strobe"
+  | "twinkle"
+  | "slideInLeft"
+  | "slideInRight"
+  | "slideInTop"
+  | "slideInBottom"
+  | "bounce"
+  | "spin"
+  | "scalePulse";
+
+export type WatermarkAnimation = {
+  type: WatermarkAnimationType;
+  /** Length of the animation in movie frames. */
+  duration: number;
+  /** Frames to wait before the animation starts. */
+  delay: number;
+  /** When true, looping animations cycle for the entire movie. */
+  loop: boolean;
+};
+
 export type WatermarkConfig = {
   enabled: boolean;
   source: TextWatermark | ImageWatermark;
@@ -73,9 +102,27 @@ export type WatermarkConfig = {
   margin: number;
   /** 0..1 alpha. */
   opacity: number;
+  animation: WatermarkAnimation;
 };
 
 export type WatermarkDimensions = { width: number; height: number };
+
+export type AnimationState = {
+  alphaMultiplier: number;
+  offsetX: number;
+  offsetY: number;
+  scale: number;
+  /** Rotation in radians, clockwise. */
+  rotation: number;
+};
+
+export const IDENTITY_ANIM_STATE: AnimationState = {
+  alphaMultiplier: 1,
+  offsetX: 0,
+  offsetY: 0,
+  scale: 1,
+  rotation: 0,
+};
 
 export const defaultTextWatermark: TextWatermark = {
   kind: "text",
@@ -100,6 +147,13 @@ export const defaultTextWatermark: TextWatermark = {
   },
 };
 
+export const defaultAnimation: WatermarkAnimation = {
+  type: "none",
+  duration: 24,
+  delay: 0,
+  loop: true,
+};
+
 export const defaultWatermark: WatermarkConfig = {
   enabled: false,
   source: defaultTextWatermark,
@@ -108,6 +162,7 @@ export const defaultWatermark: WatermarkConfig = {
   y: 0,
   margin: 24,
   opacity: 0.85,
+  animation: defaultAnimation,
 };
 
 /* ---------- Dimension measurement (shared by overlay + baker) ---------- */
@@ -271,7 +326,7 @@ export async function applyWatermark(
   const wm = await renderWatermark(cfg, movie.params.viewBoxWidth);
   if (!wm) return movie;
 
-  const { x: tx, y: ty } = resolveWatermarkPosition(
+  const basePos = resolveWatermarkPosition(
     cfg,
     wm,
     movie.params.viewBoxWidth,
@@ -279,11 +334,17 @@ export async function applyWatermark(
   );
 
   const imageKey = uniqueImageKey(movie.images);
-  const spriteBytes = buildWatermarkSprite(
+  const spriteBytes = buildAnimatedWatermarkSprite(
     imageKey,
     Math.max(1, movie.params.frames),
-    { a: 1, b: 0, c: 0, d: 1, tx, ty },
+    basePos,
+    wm,
+    {
+      width: movie.params.viewBoxWidth,
+      height: movie.params.viewBoxHeight,
+    },
     cfg.opacity,
+    cfg.animation,
   );
 
   return {
@@ -291,6 +352,154 @@ export async function applyWatermark(
     images: { ...movie.images, [imageKey]: wm.bytes },
     spriteBytes: [...movie.spriteBytes, spriteBytes],
   };
+}
+
+/* ---------- Animation calculator (shared by overlay + baker) ---------- */
+
+/**
+ * Compute the watermark's transform/alpha contribution for a specific movie
+ * frame. The result modifies a base identity state — callers add the offset
+ * to the base position, multiply alpha, apply rotation/scale around centre.
+ */
+export function computeAnimationState(
+  anim: WatermarkAnimation,
+  frameIdx: number,
+  wmDims: WatermarkDimensions,
+  basePos: { x: number; y: number },
+  viewbox: { width: number; height: number },
+): AnimationState {
+  if (anim.type === "none") return { ...IDENTITY_ANIM_STATE };
+
+  const isIn =
+    anim.type === "fadeIn" ||
+    anim.type === "slideInLeft" ||
+    anim.type === "slideInRight" ||
+    anim.type === "slideInTop" ||
+    anim.type === "slideInBottom";
+  const isOut = anim.type === "fadeOut";
+  const isLoop =
+    anim.type === "pulse" ||
+    anim.type === "blink" ||
+    anim.type === "glow" ||
+    anim.type === "flash" ||
+    anim.type === "heartbeat" ||
+    anim.type === "strobe" ||
+    anim.type === "twinkle" ||
+    anim.type === "bounce" ||
+    anim.type === "spin" ||
+    anim.type === "scalePulse";
+
+  const dur = Math.max(1, anim.duration);
+  const local = frameIdx - anim.delay;
+
+  let t: number;
+  if (local < 0) {
+    // Before the animation starts: "in" animations show their start state,
+    // everything else shows the static base.
+    if (isIn) t = 0;
+    else return { ...IDENTITY_ANIM_STATE };
+  } else if (isLoop && anim.loop) {
+    t = (local % dur) / dur;
+  } else if (local >= dur) {
+    // Finished one-shot animation: lock to end state.
+    if (isIn) return { ...IDENTITY_ANIM_STATE };
+    if (isOut) t = 1;
+    else return { ...IDENTITY_ANIM_STATE };
+  } else {
+    t = local / dur;
+  }
+
+  return stateAt(anim.type, t, wmDims, basePos, viewbox);
+}
+
+function stateAt(
+  type: WatermarkAnimationType,
+  t: number,
+  wmDims: WatermarkDimensions,
+  basePos: { x: number; y: number },
+  viewbox: { width: number; height: number },
+): AnimationState {
+  const base = { ...IDENTITY_ANIM_STATE };
+  switch (type) {
+    case "fadeIn":
+      return { ...base, alphaMultiplier: clamp01(t) };
+    case "fadeOut":
+      return { ...base, alphaMultiplier: 1 - clamp01(t) };
+    case "pulse": {
+      // Smooth oscillation between 0.3 and 1.0 alpha.
+      const wave = Math.sin(t * 2 * Math.PI) * 0.5 + 0.5;
+      return { ...base, alphaMultiplier: 0.3 + 0.7 * wave };
+    }
+    case "blink":
+      return { ...base, alphaMultiplier: t < 0.5 ? 1 : 0 };
+    case "glow": {
+      // Gentle breathing — never goes below 0.65 so the text never
+      // disappears, just brightens and softens.
+      const wave = Math.sin(t * 2 * Math.PI) * 0.5 + 0.5;
+      return { ...base, alphaMultiplier: 0.65 + 0.35 * wave };
+    }
+    case "flash": {
+      // One quick high-contrast spike per cycle then back to a quiet base.
+      if (t < 0.08) return { ...base, alphaMultiplier: 1 };
+      if (t < 0.16) return { ...base, alphaMultiplier: 0 };
+      if (t < 0.24) return { ...base, alphaMultiplier: 1 };
+      return { ...base, alphaMultiplier: 0.85 };
+    }
+    case "heartbeat": {
+      // Two close thumps then a longer rest — like a medical heart-rate pulse.
+      if (t < 0.10) return { ...base, alphaMultiplier: 1 };
+      if (t < 0.16) return { ...base, alphaMultiplier: 0.45 };
+      if (t < 0.26) return { ...base, alphaMultiplier: 1 };
+      if (t < 0.32) return { ...base, alphaMultiplier: 0.45 };
+      return { ...base, alphaMultiplier: 0.75 };
+    }
+    case "strobe": {
+      // Fast on/off — 8 hard blinks per cycle.
+      const phase = (t * 8) % 1;
+      return { ...base, alphaMultiplier: phase < 0.5 ? 1 : 0 };
+    }
+    case "twinkle": {
+      // Irregular shimmer — superimpose two off-tempo sine waves so it
+      // doesn't feel as mechanical as a plain pulse.
+      const a = Math.sin(t * 2 * Math.PI) * 0.5 + 0.5;
+      const b = Math.sin(t * 6 * Math.PI + 1.3) * 0.5 + 0.5;
+      const wave = (a * 2 + b) / 3;
+      return { ...base, alphaMultiplier: 0.5 + 0.5 * wave };
+    }
+    case "slideInLeft": {
+      const e = easeOutCubic(t);
+      return { ...base, offsetX: -(basePos.x + wmDims.width) * (1 - e) };
+    }
+    case "slideInRight": {
+      const e = easeOutCubic(t);
+      return { ...base, offsetX: (viewbox.width - basePos.x) * (1 - e) };
+    }
+    case "slideInTop": {
+      const e = easeOutCubic(t);
+      return { ...base, offsetY: -(basePos.y + wmDims.height) * (1 - e) };
+    }
+    case "slideInBottom": {
+      const e = easeOutCubic(t);
+      return { ...base, offsetY: (viewbox.height - basePos.y) * (1 - e) };
+    }
+    case "bounce": {
+      const wave = Math.abs(Math.sin(t * 2 * Math.PI));
+      return { ...base, offsetY: -wmDims.height * 0.15 * wave };
+    }
+    case "spin":
+      return { ...base, rotation: t * 2 * Math.PI };
+    case "scalePulse":
+      return { ...base, scale: 1 + 0.15 * Math.sin(t * 2 * Math.PI) };
+    default:
+      return base;
+  }
+}
+
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+function easeOutCubic(t: number): number {
+  return 1 - Math.pow(1 - clamp01(t), 3);
 }
 
 async function renderWatermark(
@@ -483,12 +692,78 @@ function uniqueImageKey(existing: Record<string, Uint8Array>): string {
 
 type Transform = { a: number; b: number; c: number; d: number; tx: number; ty: number };
 
-function buildWatermarkSprite(
+/**
+ * Build a SpriteEntity that places the watermark on every movie frame.
+ * If the animation is "none" we emit one canonical frame and repeat its
+ * bytes; otherwise each frame gets its own transform/alpha so the
+ * watermark actually moves, fades, spins, etc. in the resulting .svga.
+ */
+function buildAnimatedWatermarkSprite(
   imageKey: string,
   frameCount: number,
-  transform: Transform,
-  alpha: number,
+  basePos: { x: number; y: number },
+  wmDims: WatermarkDimensions,
+  viewbox: { width: number; height: number },
+  baseAlpha: number,
+  animation: WatermarkAnimation,
 ): Uint8Array {
+  const spriteW = Writer.create();
+  spriteW.uint32((1 << 3) | 2).string(imageKey);
+
+  if (animation.type === "none") {
+    const staticFrame = buildFrameBytes(
+      makeFrameTransform(basePos, wmDims, IDENTITY_ANIM_STATE),
+      baseAlpha,
+    );
+    for (let i = 0; i < frameCount; i++) {
+      spriteW.uint32((2 << 3) | 2).bytes(staticFrame);
+    }
+    return spriteW.finish();
+  }
+
+  for (let i = 0; i < frameCount; i++) {
+    const state = computeAnimationState(animation, i, wmDims, basePos, viewbox);
+    const transform = makeFrameTransform(basePos, wmDims, state);
+    const alpha = baseAlpha * state.alphaMultiplier;
+    spriteW.uint32((2 << 3) | 2).bytes(buildFrameBytes(transform, alpha));
+  }
+  return spriteW.finish();
+}
+
+/**
+ * Compose the affine matrix that:
+ *   1. positions the watermark at (basePos + animation offset)
+ *   2. rotates by `state.rotation` and scales by `state.scale` about the
+ *      bitmap centre (so the visual pivot is the middle of the watermark).
+ */
+function makeFrameTransform(
+  basePos: { x: number; y: number },
+  wmDims: WatermarkDimensions,
+  state: AnimationState,
+): Transform {
+  const cx = wmDims.width / 2;
+  const cy = wmDims.height / 2;
+  const s = state.scale;
+  const cosTh = Math.cos(state.rotation);
+  const sinTh = Math.sin(state.rotation);
+
+  // 2×2 part — clockwise rotation in screen space, uniform scale.
+  const a = s * cosTh;
+  const b = s * sinTh;
+  const c = -s * sinTh;
+  const d = s * cosTh;
+
+  // Translate to (basePos + animation offset), then pre/post translate by
+  // the bitmap centre so rotation/scale pivots around the middle.
+  const px = basePos.x + state.offsetX;
+  const py = basePos.y + state.offsetY;
+  const tx = px + cx - a * cx - c * cy;
+  const ty = py + cy - b * cx - d * cy;
+
+  return { a, b, c, d, tx, ty };
+}
+
+function buildFrameBytes(transform: Transform, alpha: number): Uint8Array {
   const transformW = Writer.create();
   transformW.uint32((1 << 3) | 5).float(transform.a);
   transformW.uint32((2 << 3) | 5).float(transform.b);
@@ -496,19 +771,11 @@ function buildWatermarkSprite(
   transformW.uint32((4 << 3) | 5).float(transform.d);
   transformW.uint32((5 << 3) | 5).float(transform.tx);
   transformW.uint32((6 << 3) | 5).float(transform.ty);
-  const transformBytes = transformW.finish();
 
   const frameW = Writer.create();
   frameW.uint32((1 << 3) | 5).float(alpha);
-  frameW.uint32((3 << 3) | 2).bytes(transformBytes);
-  const frameBytes = frameW.finish();
-
-  const spriteW = Writer.create();
-  spriteW.uint32((1 << 3) | 2).string(imageKey);
-  for (let i = 0; i < frameCount; i++) {
-    spriteW.uint32((2 << 3) | 2).bytes(frameBytes);
-  }
-  return spriteW.finish();
+  frameW.uint32((3 << 3) | 2).bytes(transformW.finish());
+  return frameW.finish();
 }
 
 /* ---------- canvas helpers ---------- */
