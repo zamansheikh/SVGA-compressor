@@ -1,10 +1,14 @@
 "use client";
 
 import { useCallback } from "react";
-import type {
-  ImageWatermark,
-  TextWatermark,
-  WatermarkConfig,
+import {
+  defaultTextWatermark,
+  type GradientFill,
+  type ImageWatermark,
+  type TextBackground,
+  type TextShadow,
+  type TextWatermark,
+  type WatermarkConfig,
 } from "@/lib/watermark";
 
 type Props = {
@@ -20,16 +24,7 @@ export default function Watermark({ value, onChange, disabled }: Props) {
   const setKind = (kind: "text" | "image") => {
     if (kind === value.source.kind) return;
     if (kind === "text") {
-      setSource({
-        kind: "text",
-        text: "© Your Brand",
-        fontSize: 32,
-        color: "#ffffff",
-        stroke: true,
-        bg: false,
-        bgColor: "#000000",
-        bgOpacity: 0.5,
-      });
+      setSource(defaultTextWatermark);
     } else {
       setSource({
         kind: "image",
@@ -84,7 +79,6 @@ export default function Watermark({ value, onChange, disabled }: Props) {
 
       {value.enabled && (
         <>
-          {/* Kind tabs */}
           <div className="grid grid-cols-2 gap-2">
             {(["text", "image"] as const).map((k) => (
               <button
@@ -103,7 +97,6 @@ export default function Watermark({ value, onChange, disabled }: Props) {
             ))}
           </div>
 
-          {/* Source-specific controls */}
           {value.source.kind === "text" ? (
             <TextControls value={value.source} onChange={setSource} disabled={disabled} />
           ) : (
@@ -115,7 +108,6 @@ export default function Watermark({ value, onChange, disabled }: Props) {
             />
           )}
 
-          {/* Position readout */}
           <div className="flex items-baseline justify-between">
             <span className="text-sm font-medium text-white/80">Position</span>
             {value.position === "custom" ? (
@@ -133,9 +125,8 @@ export default function Watermark({ value, onChange, disabled }: Props) {
             (Shift = 10px).
           </p>
 
-          {/* Opacity */}
           <Slider
-            label="Opacity"
+            label="Overall opacity"
             value={Math.round(value.opacity * 100)}
             onChange={(n) => onChange({ ...value, opacity: n / 100 })}
             min={10}
@@ -150,6 +141,10 @@ export default function Watermark({ value, onChange, disabled }: Props) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Text watermark — text content + colour + effects + background       */
+/* ------------------------------------------------------------------ */
+
 function TextControls({
   value,
   onChange,
@@ -159,6 +154,15 @@ function TextControls({
   onChange: (v: TextWatermark) => void;
   disabled?: boolean;
 }) {
+  const setShadow = (next: Partial<TextShadow>) =>
+    onChange({ ...value, shadow: { ...value.shadow, ...next } });
+  const setGradient = (next: Partial<GradientFill>) =>
+    onChange({ ...value, gradient: { ...value.gradient, ...next } });
+  const setBg = (next: Partial<TextBackground>) =>
+    onChange({ ...value, bg: { ...value.bg, ...next } });
+  const setBgGradient = (next: Partial<GradientFill>) =>
+    setBg({ gradient: { ...value.bg.gradient, ...next } });
+
   return (
     <div className="space-y-4">
       <div>
@@ -188,73 +192,153 @@ function TextControls({
         disabled={disabled}
       />
 
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="block text-xs text-white/60 mb-1.5" htmlFor="wm-color">
-            Text color
-          </label>
-          <div className="flex items-center gap-2">
-            <input
-              id="wm-color"
-              type="color"
-              value={value.color}
-              onChange={(e) => onChange({ ...value, color: e.target.value })}
-              disabled={disabled}
-              className="h-9 w-12 rounded cursor-pointer bg-transparent border border-white/10"
-            />
-            <span className="text-xs font-mono text-white/60">{value.color.toUpperCase()}</span>
-          </div>
-        </div>
-        <div>
-          <label className="flex items-center gap-2 mt-7 text-xs text-white/70 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={value.stroke}
-              onChange={(e) => onChange({ ...value, stroke: e.target.checked })}
-              disabled={disabled}
-              className="h-4 w-4 accent-brand-500"
-            />
-            Dark outline (legibility)
-          </label>
-        </div>
-      </div>
+      <ColorRow
+        label="Text color"
+        value={value.color}
+        onChange={(c) => onChange({ ...value, color: c })}
+        disabled={disabled}
+      />
 
-      <div className="border-t border-white/5 pt-4">
-        <label className="flex items-center gap-2 text-sm font-medium text-white/80 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={value.bg}
-            onChange={(e) => onChange({ ...value, bg: e.target.checked })}
+      <Checkbox
+        label="Use gradient"
+        checked={value.gradient.enabled}
+        onChange={(b) => setGradient({ enabled: b })}
+        disabled={disabled}
+      />
+      {value.gradient.enabled && (
+        <div className="pl-6 space-y-3 border-l border-white/5">
+          <ColorRow
+            label="Gradient end"
+            value={value.gradient.secondColor}
+            onChange={(c) => setGradient({ secondColor: c })}
             disabled={disabled}
-            className="h-4 w-4 accent-brand-500"
           />
-          Background pill
-        </label>
+          <Slider
+            label="Gradient angle"
+            value={value.gradient.angle}
+            onChange={(n) => setGradient({ angle: n })}
+            min={0}
+            max={360}
+            step={5}
+            suffix="°"
+            disabled={disabled}
+          />
+        </div>
+      )}
 
-        {value.bg && (
-          <div className="mt-3 space-y-3">
-            <div>
-              <label className="block text-xs text-white/60 mb-1.5" htmlFor="wm-bg-color">
-                Background color
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  id="wm-bg-color"
-                  type="color"
-                  value={value.bgColor}
-                  onChange={(e) => onChange({ ...value, bgColor: e.target.value })}
+      <Checkbox
+        label="Dark outline (legibility)"
+        checked={value.stroke}
+        onChange={(b) => onChange({ ...value, stroke: b })}
+        disabled={disabled}
+      />
+
+      <Checkbox
+        label="Drop shadow / glow"
+        checked={value.shadow.enabled}
+        onChange={(b) => setShadow({ enabled: b })}
+        disabled={disabled}
+      />
+      {value.shadow.enabled && (
+        <div className="pl-6 space-y-3 border-l border-white/5">
+          <ColorRow
+            label="Shadow color"
+            value={value.shadow.color}
+            onChange={(c) => setShadow({ color: c })}
+            disabled={disabled}
+          />
+          <Slider
+            label="Blur"
+            value={value.shadow.blur}
+            onChange={(n) => setShadow({ blur: n })}
+            min={0}
+            max={60}
+            step={1}
+            suffix="px"
+            disabled={disabled}
+          />
+          <Slider
+            label="Offset X"
+            value={value.shadow.offsetX}
+            onChange={(n) => setShadow({ offsetX: n })}
+            min={-40}
+            max={40}
+            step={1}
+            suffix="px"
+            disabled={disabled}
+          />
+          <Slider
+            label="Offset Y"
+            value={value.shadow.offsetY}
+            onChange={(n) => setShadow({ offsetY: n })}
+            min={-40}
+            max={40}
+            step={1}
+            suffix="px"
+            disabled={disabled}
+          />
+        </div>
+      )}
+
+      <div className="border-t border-white/5 pt-4 space-y-4">
+        <Checkbox
+          label="Background pill"
+          checked={value.bg.enabled}
+          onChange={(b) => setBg({ enabled: b })}
+          disabled={disabled}
+          strong
+        />
+
+        {value.bg.enabled && (
+          <div className="pl-6 space-y-3 border-l border-white/5">
+            <ColorRow
+              label="Background color"
+              value={value.bg.color}
+              onChange={(c) => setBg({ color: c })}
+              disabled={disabled}
+            />
+
+            <Checkbox
+              label="Background gradient"
+              checked={value.bg.gradient.enabled}
+              onChange={(b) => setBgGradient({ enabled: b })}
+              disabled={disabled}
+            />
+            {value.bg.gradient.enabled && (
+              <div className="pl-6 space-y-3 border-l border-white/5">
+                <ColorRow
+                  label="Gradient end"
+                  value={value.bg.gradient.secondColor}
+                  onChange={(c) => setBgGradient({ secondColor: c })}
                   disabled={disabled}
-                  className="h-9 w-12 rounded cursor-pointer bg-transparent border border-white/10"
                 />
-                <span className="text-xs font-mono text-white/60">
-                  {value.bgColor.toUpperCase()}
-                </span>
+                <Slider
+                  label="Gradient angle"
+                  value={value.bg.gradient.angle}
+                  onChange={(n) => setBgGradient({ angle: n })}
+                  min={0}
+                  max={360}
+                  step={5}
+                  suffix="°"
+                  disabled={disabled}
+                />
               </div>
-            </div>
+            )}
+
+            <Slider
+              label="Corner radius"
+              value={value.bg.radius}
+              onChange={(n) => setBg({ radius: n })}
+              min={0}
+              max={Math.max(40, Math.round(value.fontSize * 1.2))}
+              step={1}
+              suffix="px"
+              disabled={disabled}
+            />
             <Slider
               label="Background opacity"
-              value={Math.round(value.bgOpacity * 100)}
-              onChange={(n) => onChange({ ...value, bgOpacity: n / 100 })}
+              value={Math.round(value.bg.opacity * 100)}
+              onChange={(n) => setBg({ opacity: n / 100 })}
               min={0}
               max={100}
               step={5}
@@ -267,6 +351,10 @@ function TextControls({
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* Image watermark                                                     */
+/* ------------------------------------------------------------------ */
 
 function ImageControls({
   value,
@@ -332,6 +420,10 @@ function ImageControls({
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Small reusable controls                                              */
+/* ------------------------------------------------------------------ */
+
 function Slider({
   label,
   value,
@@ -371,5 +463,66 @@ function Slider({
         className="mt-2"
       />
     </div>
+  );
+}
+
+function ColorRow({
+  label,
+  value,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-sm font-medium text-white/80">{label}</span>
+      <div className="flex items-center gap-2">
+        <input
+          type="color"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+          className="h-9 w-12 rounded cursor-pointer bg-transparent border border-white/10"
+        />
+        <span className="text-xs font-mono text-white/60 tabular-nums">
+          {value.toUpperCase()}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function Checkbox({
+  label,
+  checked,
+  onChange,
+  disabled,
+  strong,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (b: boolean) => void;
+  disabled?: boolean;
+  strong?: boolean;
+}) {
+  return (
+    <label
+      className={`flex items-center gap-2 cursor-pointer ${
+        strong ? "text-sm font-medium text-white/80" : "text-xs text-white/70"
+      } ${disabled ? "opacity-60 cursor-not-allowed" : ""}`}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        disabled={disabled}
+        className="h-4 w-4 accent-brand-500"
+      />
+      {label}
+    </label>
   );
 }

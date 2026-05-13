@@ -12,17 +12,41 @@ export type WatermarkPosition =
 
 export type WatermarkAnchor = WatermarkPosition | "custom";
 
+export type GradientFill = {
+  enabled: boolean;
+  /** Secondary colour blended with the parent's primary colour. */
+  secondColor: string;
+  /** Direction in degrees: 0° = left→right, 90° = top→bottom. */
+  angle: number;
+};
+
+export type TextShadow = {
+  enabled: boolean;
+  color: string;
+  /** Blur radius in viewbox pixels. */
+  blur: number;
+  offsetX: number;
+  offsetY: number;
+};
+
+export type TextBackground = {
+  enabled: boolean;
+  color: string;
+  opacity: number;
+  gradient: GradientFill;
+  /** Corner radius in viewbox pixels. */
+  radius: number;
+};
+
 export type TextWatermark = {
   kind: "text";
   text: string;
   fontSize: number;
   color: string;
+  gradient: GradientFill;
   stroke: boolean;
-  bg: boolean;
-  /** Background colour in `#rrggbb` form when `bg` is true. */
-  bgColor: string;
-  /** 0..1 alpha multiplier for the background fill. */
-  bgOpacity: number;
+  shadow: TextShadow;
+  bg: TextBackground;
 };
 
 export type ImageWatermark = {
@@ -53,18 +77,32 @@ export type WatermarkConfig = {
 
 export type WatermarkDimensions = { width: number; height: number };
 
+export const defaultTextWatermark: TextWatermark = {
+  kind: "text",
+  text: "© Your Brand",
+  fontSize: 32,
+  color: "#ffffff",
+  gradient: { enabled: false, secondColor: "#8b5cf6", angle: 90 },
+  stroke: true,
+  shadow: {
+    enabled: false,
+    color: "#000000",
+    blur: 8,
+    offsetX: 0,
+    offsetY: 2,
+  },
+  bg: {
+    enabled: false,
+    color: "#000000",
+    opacity: 0.5,
+    gradient: { enabled: false, secondColor: "#3066ff", angle: 90 },
+    radius: 12,
+  },
+};
+
 export const defaultWatermark: WatermarkConfig = {
   enabled: false,
-  source: {
-    kind: "text",
-    text: "© Your Brand",
-    fontSize: 32,
-    color: "#ffffff",
-    stroke: true,
-    bg: false,
-    bgColor: "#000000",
-    bgOpacity: 0.5,
-  },
+  source: defaultTextWatermark,
   position: "bottom-right",
   x: 0,
   y: 0,
@@ -84,7 +122,21 @@ export async function measureWatermark(
   return measureImage(cfg.source, viewboxWidth);
 }
 
-function measureText(t: TextWatermark): WatermarkDimensions | null {
+type TextLayout = {
+  /** Full bitmap size (content + shadow extents). */
+  width: number;
+  height: number;
+  /** Content rectangle inside the bitmap (where bg pill + text sit). */
+  contentX: number;
+  contentY: number;
+  contentW: number;
+  contentH: number;
+  /** Baseline position for ctx.fillText / strokeText. */
+  baselineX: number;
+  baselineY: number;
+};
+
+function layoutText(t: TextWatermark): TextLayout | null {
   if (!t.text.trim()) return null;
   const canvas = makeCanvas(10, 10);
   const ctx = get2dCtx(canvas);
@@ -93,10 +145,38 @@ function measureText(t: TextWatermark): WatermarkDimensions | null {
   const ascent = metrics.actualBoundingBoxAscent || t.fontSize * 0.8;
   const descent = metrics.actualBoundingBoxDescent || t.fontSize * 0.2;
   const padding = Math.ceil(t.fontSize * 0.35);
+  const contentW = Math.ceil(metrics.width + padding * 2);
+  const contentH = Math.ceil(ascent + descent + padding * 2);
+
+  // Shadow extends the bitmap beyond the content rectangle. We need to grow
+  // the bitmap on each side so the shadow isn't clipped.
+  const sh = t.shadow;
+  let padLeft = 0, padTop = 0, padRight = 0, padBottom = 0;
+  if (sh.enabled) {
+    const grow = sh.blur;
+    padLeft = Math.max(0, grow - sh.offsetX);
+    padTop = Math.max(0, grow - sh.offsetY);
+    padRight = Math.max(0, grow + sh.offsetX);
+    padBottom = Math.max(0, grow + sh.offsetY);
+  }
+
+  const width = contentW + padLeft + padRight;
+  const height = contentH + padTop + padBottom;
   return {
-    width: Math.ceil(metrics.width + padding * 2),
-    height: Math.ceil(ascent + descent + padding * 2),
+    width,
+    height,
+    contentX: padLeft,
+    contentY: padTop,
+    contentW,
+    contentH,
+    baselineX: padLeft + padding,
+    baselineY: padTop + padding + ascent,
   };
+}
+
+function measureText(t: TextWatermark): WatermarkDimensions | null {
+  const layout = layoutText(t);
+  return layout && { width: layout.width, height: layout.height };
 }
 
 async function measureImage(
@@ -222,69 +302,152 @@ async function renderWatermark(
 }
 
 async function renderTextWatermark(t: TextWatermark): Promise<RenderedWatermark | null> {
-  const dims = measureText(t);
-  if (!dims) return null;
+  const layout = layoutText(t);
+  if (!layout) return null;
 
-  const canvas = makeCanvas(dims.width, dims.height);
+  const canvas = makeCanvas(layout.width, layout.height);
   const ctx = get2dCtx(canvas);
 
-  // Background pill (if enabled) — drawn before the text so the text sits on top.
-  if (t.bg) {
-    const radius = Math.min(dims.height / 2, t.fontSize * 0.35);
-    fillRoundedRect(ctx, 0, 0, dims.width, dims.height, radius, t.bgColor, t.bgOpacity);
+  // 1) Background pill — drawn first so everything else lands on top.
+  if (t.bg.enabled) {
+    const radius = Math.max(
+      0,
+      Math.min(t.bg.radius, layout.contentW / 2, layout.contentH / 2),
+    );
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, t.bg.opacity));
+    ctx.fillStyle = t.bg.gradient.enabled
+      ? linearGradientFromAngle(
+          ctx,
+          layout.contentX,
+          layout.contentY,
+          layout.contentW,
+          layout.contentH,
+          t.bg.gradient.angle,
+          t.bg.color,
+          t.bg.gradient.secondColor,
+        )
+      : t.bg.color;
+    pathRoundedRect(
+      ctx,
+      layout.contentX,
+      layout.contentY,
+      layout.contentW,
+      layout.contentH,
+      radius,
+    );
+    ctx.fill();
+    ctx.restore();
   }
 
+  // 2) Configure font / baseline.
   ctx.font = textFont(t.fontSize);
   ctx.textBaseline = "alphabetic";
   ctx.textAlign = "left";
 
-  const padding = Math.ceil(t.fontSize * 0.35);
-  const ascent = dims.height - padding * 2 - Math.ceil(t.fontSize * 0.2);
-  const baselineY = padding + ascent;
+  // 3) Drop shadow — Canvas applies shadowColor/shadowBlur/offsets to every
+  //    drawing operation until we clear them. We set this BEFORE drawing the
+  //    text so the shadow appears around (or behind) the text glyphs.
+  if (t.shadow.enabled) {
+    ctx.shadowColor = t.shadow.color;
+    ctx.shadowBlur = t.shadow.blur;
+    ctx.shadowOffsetX = t.shadow.offsetX;
+    ctx.shadowOffsetY = t.shadow.offsetY;
+  }
 
+  // 4) Stroke — keeps the dark outline regardless of fill colour / gradient.
   if (t.stroke) {
     ctx.lineWidth = Math.max(2, t.fontSize / 10);
     ctx.lineJoin = "round";
     ctx.strokeStyle = "rgba(0,0,0,0.75)";
-    ctx.strokeText(t.text, padding, baselineY);
+    ctx.strokeText(t.text, layout.baselineX, layout.baselineY);
   }
-  ctx.fillStyle = t.color;
-  ctx.fillText(t.text, padding, baselineY);
 
-  return { bytes: await canvasToPngBytes(canvas), width: dims.width, height: dims.height };
+  // 5) Fill — solid colour or linear gradient across the text bounding box.
+  if (t.gradient.enabled) {
+    // The gradient maps onto the visible text rectangle, NOT the whole bitmap,
+    // so the colour transition isn't squashed when the shadow extends the bitmap.
+    ctx.fillStyle = linearGradientFromAngle(
+      ctx,
+      layout.contentX,
+      layout.contentY,
+      layout.contentW,
+      layout.contentH,
+      t.gradient.angle,
+      t.color,
+      t.gradient.secondColor,
+    );
+  } else {
+    ctx.fillStyle = t.color;
+  }
+  ctx.fillText(t.text, layout.baselineX, layout.baselineY);
+
+  // Reset shadow state in case any downstream code reuses ctx.
+  ctx.shadowColor = "rgba(0,0,0,0)";
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
+
+  return {
+    bytes: await canvasToPngBytes(canvas),
+    width: layout.width,
+    height: layout.height,
+  };
 }
 
-function fillRoundedRect(
+/** Build a linear gradient that spans an axis-aligned box at the given angle. */
+function linearGradientFromAngle(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  angleDeg: number,
+  startColor: string,
+  endColor: string,
+): CanvasGradient {
+  // 0° = left→right; 90° = top→bottom; rotates clockwise.
+  const rad = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const projLen = Math.abs(w * cos) + Math.abs(h * sin);
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const x0 = cx - (cos * projLen) / 2;
+  const y0 = cy - (sin * projLen) / 2;
+  const x1 = cx + (cos * projLen) / 2;
+  const y1 = cy + (sin * projLen) / 2;
+  const g = ctx.createLinearGradient(x0, y0, x1, y1);
+  g.addColorStop(0, startColor);
+  g.addColorStop(1, endColor);
+  return g;
+}
+
+/** Trace a rounded rectangle as the current path. Caller fills or strokes. */
+function pathRoundedRect(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   x: number,
   y: number,
   w: number,
   h: number,
   r: number,
-  color: string,
-  opacity: number,
 ) {
-  ctx.save();
-  ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
-  ctx.fillStyle = color;
   ctx.beginPath();
   if (typeof (ctx as CanvasRenderingContext2D).roundRect === "function") {
     (ctx as CanvasRenderingContext2D).roundRect(x, y, w, h, r);
-  } else {
-    // Manual rounded-rect fallback for older browsers.
-    ctx.moveTo(x + r, y);
-    ctx.lineTo(x + w - r, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-    ctx.lineTo(x + w, y + h - r);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-    ctx.lineTo(x + r, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-    ctx.lineTo(x, y + r);
-    ctx.quadraticCurveTo(x, y, x + r, y);
-    ctx.closePath();
+    return;
   }
-  ctx.fill();
-  ctx.restore();
+  // Manual fallback for older runtimes.
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
 }
 
 async function renderImageWatermark(
