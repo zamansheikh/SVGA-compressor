@@ -3,14 +3,26 @@
 import { useEffect, useRef, useState } from "react";
 import { createRendererFromMovie, type Renderer } from "@/lib/renderer";
 import type { MovieFile } from "@/lib/svga";
+import type { WatermarkConfig } from "@/lib/watermark";
+import WatermarkOverlay from "./WatermarkOverlay";
 
 type Props = {
   movie: MovieFile | null;
   label: string;
   accent?: "brand" | "violet";
+  /** When provided, renders an interactive watermark overlay on top. */
+  watermark?: WatermarkConfig;
+  /** Called when the user drags or nudges the watermark overlay. */
+  onWatermarkChange?: (next: WatermarkConfig) => void;
 };
 
-export default function SvgaPreview({ movie, label, accent = "brand" }: Props) {
+export default function SvgaPreview({
+  movie,
+  label,
+  accent = "brand",
+  watermark,
+  onWatermarkChange,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<Renderer | null>(null);
   const [frame, setFrame] = useState(0);
@@ -91,11 +103,23 @@ export default function SvgaPreview({ movie, label, accent = "brand" }: Props) {
         {err && (
           <div className="text-center text-red-400 text-sm py-8 max-w-xs">{err}</div>
         )}
-        <canvas
-          ref={canvasRef}
-          className={`${movie ? "block" : "hidden"} max-w-full max-h-[50vh] w-auto h-auto rounded-lg`}
-          style={{ imageRendering: "auto" }}
-        />
+        {/* Wrapper anchors the watermark overlay to the canvas's exact box. */}
+        <div className="relative">
+          <canvas
+            ref={canvasRef}
+            className={`${movie ? "block" : "hidden"} max-w-full max-h-[38vh] w-auto h-auto rounded-lg`}
+            style={{ imageRendering: "auto" }}
+          />
+          {movie && watermark?.enabled && onWatermarkChange && (
+            <WatermarkOverlay
+              anchorRef={canvasRef}
+              viewboxWidth={movie.params.viewBoxWidth}
+              viewboxHeight={movie.params.viewBoxHeight}
+              config={watermark}
+              onChange={onWatermarkChange}
+            />
+          )}
+        </div>
       </div>
 
       {movie && (

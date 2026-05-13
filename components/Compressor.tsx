@@ -5,6 +5,7 @@ import Dropzone from "./Dropzone";
 import SvgaPreview from "./SvgaPreview";
 import Controls from "./Controls";
 import Stats from "./Stats";
+import Watermark from "./Watermark";
 import {
   compressMovieImages,
   formatBytes,
@@ -16,6 +17,11 @@ import {
   imagesByteSize,
   type MovieFile,
 } from "@/lib/svga";
+import {
+  applyWatermark,
+  defaultWatermark,
+  type WatermarkConfig,
+} from "@/lib/watermark";
 
 type Progress = { done: number; total: number; label: string };
 
@@ -32,6 +38,7 @@ export default function Compressor() {
     format: "png",
     colors: 128,
   });
+  const [watermark, setWatermark] = useState<WatermarkConfig>(defaultWatermark);
   const [working, setWorking] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,9 +71,13 @@ export default function Compressor() {
     setError(null);
     setProgress({ done: 0, total: Object.keys(originalMovie.images).length, label: "Starting" });
     try {
-      const next = await compressMovieImages(originalMovie, options, (done, total, label) =>
+      const compressed = await compressMovieImages(originalMovie, options, (done, total, label) =>
         setProgress({ done, total, label }),
       );
+      setProgress({ done: 1, total: 1, label: "Applying watermark" });
+      const next = watermark.enabled
+        ? await applyWatermark(compressed, watermark)
+        : compressed;
       setProgress({ done: 1, total: 1, label: "Encoding SVGA" });
       const bytes = await encodeSvga(next);
       setCompressedMovie(next);
@@ -77,7 +88,7 @@ export default function Compressor() {
     } finally {
       setWorking(false);
     }
-  }, [originalMovie, options]);
+  }, [originalMovie, options, watermark]);
 
   const download = useCallback(() => {
     if (!compressedBytes || !file) return;
@@ -142,17 +153,32 @@ export default function Compressor() {
 
       {originalMovie && (
         <>
-          <div className="grid gap-4 md:grid-cols-2">
-            <SvgaPreview movie={originalMovie} label="Original" />
-            <SvgaPreview
-              movie={compressedMovie ?? null}
-              label={compressedMovie ? "Compressed" : "Compressed (run to preview)"}
-              accent="violet"
-            />
+          {/* Previews stick to the top while the controls scroll below, so
+              you always see the result of what you're adjusting. The blurred
+              backdrop keeps the cards legible over moving content. */}
+          <div className="md:sticky md:top-2 md:z-20 md:-mx-2 md:px-2 md:py-2 md:rounded-2xl md:backdrop-blur-xl md:bg-[#070914]/60">
+            <div className="grid gap-4 md:grid-cols-2">
+              <SvgaPreview
+                movie={originalMovie}
+                label="Original"
+                watermark={watermark}
+                onWatermarkChange={setWatermark}
+              />
+              <SvgaPreview
+                movie={compressedMovie ?? null}
+                label={compressedMovie ? "Compressed" : "Compressed (run to preview)"}
+                accent="violet"
+                watermark={compressedMovie ? undefined : watermark}
+                onWatermarkChange={compressedMovie ? undefined : setWatermark}
+              />
+            </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-[1fr_320px]">
-            <Controls value={options} onChange={setOptions} disabled={working} />
+            <div className="space-y-4">
+              <Controls value={options} onChange={setOptions} disabled={working} />
+              <Watermark value={watermark} onChange={setWatermark} disabled={working} />
+            </div>
             <Stats
               originalSize={originalSize}
               compressedSize={compressedSize}
@@ -160,7 +186,11 @@ export default function Compressor() {
             />
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-3">
+          {/* Action bar stays anchored to the bottom of the viewport so
+              Compress / Download are always one tap away, no matter how
+              deep you scroll into the controls. */}
+          <div className="sticky bottom-2 z-30 -mx-2 px-2 py-2 rounded-2xl backdrop-blur-xl bg-[#070914]/70 border border-white/5">
+            <div className="flex flex-col sm:flex-row gap-3">
             <button
               type="button"
               onClick={compress}
@@ -177,6 +207,7 @@ export default function Compressor() {
             >
               Download .svga
             </button>
+            </div>
           </div>
         </>
       )}
