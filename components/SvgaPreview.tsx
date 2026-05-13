@@ -1,9 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createRendererFromMovie, type Renderer } from "@/lib/renderer";
 import type { MovieFile } from "@/lib/svga";
-import type { WatermarkConfig } from "@/lib/watermark";
+import {
+  computeAnimationState,
+  renderWatermarkPng,
+  resolveWatermarkPosition,
+  type WatermarkConfig,
+} from "@/lib/watermark";
 import WatermarkOverlay from "./WatermarkOverlay";
 
 type Props = {
@@ -14,6 +19,8 @@ type Props = {
   watermark?: WatermarkConfig;
   /** Called when the user drags or nudges the watermark overlay. */
   onWatermarkChange?: (next: WatermarkConfig) => void;
+  /** Base filename (without extension) used for exported frames. */
+  exportNameBase?: string;
 };
 
 export default function SvgaPreview({
@@ -22,6 +29,7 @@ export default function SvgaPreview({
   accent = "brand",
   watermark,
   onWatermarkChange,
+  exportNameBase,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<Renderer | null>(null);
@@ -29,6 +37,7 @@ export default function SvgaPreview({
   const [totalFrames, setTotalFrames] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (!movie || !canvasRef.current) return;
@@ -77,6 +86,98 @@ export default function SvgaPreview({
     setIsPlaying(false);
     rendererRef.current?.seek(f);
   };
+
+  /**
+   * Snapshot the currently-displayed frame as a PNG.
+   *
+   * The canvas already holds whatever the renderer drew for this frame, so
+   * we use its bitmap as the starting point. If the watermark is being
+   * shown via the live overlay (i.e. this pane drives `onWatermarkChange`
+   * — the original pane before bake), we composite the watermark PNG into
+   * the snapshot using the exact same animation state the overlay applies
+   * on screen. The compressed pane already has the watermark baked into
+   * the canvas via the SVGA sprites, so no compositing is needed.
+   */
+  const exportFrame = useCallback(async () => {
+    if (!canvasRef.current || !movie) return;
+    setExporting(true);
+    try {
+      const src = canvasRef.current;
+      // Build the export canvas at the source's native pixel resolution.
+      const out = document.createElement("canvas");
+      out.width = src.width;
+      out.height = src.height;
+      const ctx = out.getContext("2d");
+      if (!ctx) throw new Error("Failed to get export canvas context");
+      ctx.drawImage(src, 0, 0);
+
+      const showsOverlay = !!(watermark?.enabled && onWatermarkChange);
+      if (showsOverlay && watermark) {
+        const wm = await renderWatermarkPng(watermark, movie.params.viewBoxWidth);
+        if (wm) {
+          const wmBlob = new Blob([wm.bytes as BlobPart], { type: "image/png" });
+          const wmBmp = await createImageBitmap(wmBlob);
+          const basePos = resolveWatermarkPosition(
+            watermark,
+            wm,
+            movie.params.viewBoxWidth,
+            movie.params.viewBoxHeight,
+          );
+          const state = computeAnimationState(
+            watermark.animation,
+            frame,
+            wm,
+            basePos,
+            {
+              width: movie.params.viewBoxWidth,
+              height: movie.params.viewBoxHeight,
+            },
+          );
+
+          // The source canvas was scaled by the renderer with DPR ×
+          // viewbox→canvas. To draw the watermark in matching coordinates
+          // we replicate that scaling.
+          const dprX = src.width / movie.params.viewBoxWidth;
+          const dprY = src.height / movie.params.viewBoxHeight;
+          ctx.save();
+          ctx.scale(dprX, dprY);
+          ctx.globalAlpha = watermark.opacity * state.alphaMultiplier;
+          const px = basePos.x + state.offsetX;
+          const py = basePos.y + state.offsetY;
+          const cx = wm.width / 2;
+          const cy = wm.height / 2;
+          // Pivot rotation/scale around the watermark's centre.
+          ctx.translate(px + cx, py + cy);
+          ctx.rotate(state.rotation);
+          ctx.scale(state.scale, state.scale);
+          ctx.drawImage(wmBmp, -cx, -cy);
+          ctx.restore();
+          wmBmp.close?.();
+        }
+      }
+
+      const blob = await new Promise<Blob | null>((resolve) => {
+        out.toBlob(resolve, "image/png");
+      });
+      if (!blob) throw new Error("toBlob returned null");
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safeBase =
+        (exportNameBase || label).toLowerCase().replace(/[^a-z0-9]+/g, "_") ||
+        "frame";
+      a.download = `${safeBase}_frame_${String(frame + 1).padStart(3, "0")}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      console.error("Frame export failed:", e);
+    } finally {
+      setExporting(false);
+    }
+  }, [movie, frame, watermark, onWatermarkChange, label, exportNameBase]);
 
   const accentClass = accent === "violet" ? "from-violet-500 to-fuchsia-500" : "from-brand-500 to-cyan-400";
 
@@ -158,6 +259,25 @@ export default function SvgaPreview({
           <span className="text-[11px] font-mono text-white/60 tabular-nums w-14 text-right">
             {frame + 1}/{totalFrames}
           </span>
+          <button
+            type="button"
+            onClick={exportFrame}
+            disabled={exporting}
+            aria-label={`Save frame ${frame + 1} as PNG`}
+            title={`Save frame ${frame + 1} as PNG`}
+            className="h-9 w-9 rounded-full grid place-items-center bg-white/10 hover:bg-white/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {exporting ? (
+              <svg viewBox="0 0 24 24" className="h-4 w-4 fill-white animate-spin">
+                <path d="M12 4a8 8 0 1 1-8 8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" className="h-4 w-4 fill-white">
+                <path d="M12 3a1 1 0 0 1 1 1v9.586l3.293-3.293a1 1 0 1 1 1.414 1.414l-5 5a1 1 0 0 1-1.414 0l-5-5a1 1 0 1 1 1.414-1.414L11 13.586V4a1 1 0 0 1 1-1Z" />
+                <path d="M4 17a1 1 0 0 1 1 1v2h14v-2a1 1 0 1 1 2 0v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z" />
+              </svg>
+            )}
+          </button>
         </div>
       )}
     </div>

@@ -163,6 +163,9 @@ export default function Compressor() {
                 label="Original"
                 watermark={watermark}
                 onWatermarkChange={setWatermark}
+                exportNameBase={
+                  file ? file.name.replace(/\.svga$/i, "") + "_original" : "original"
+                }
               />
               <SvgaPreview
                 movie={compressedMovie ?? null}
@@ -170,6 +173,9 @@ export default function Compressor() {
                 accent="violet"
                 watermark={compressedMovie ? undefined : watermark}
                 onWatermarkChange={compressedMovie ? undefined : setWatermark}
+                exportNameBase={
+                  file ? file.name.replace(/\.svga$/i, "") + "_compressed" : "compressed"
+                }
               />
             </div>
           </div>
