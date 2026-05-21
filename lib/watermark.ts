@@ -714,6 +714,7 @@ function buildAnimatedWatermarkSprite(
     const staticFrame = buildFrameBytes(
       makeFrameTransform(basePos, wmDims, IDENTITY_ANIM_STATE),
       baseAlpha,
+      wmDims,
     );
     for (let i = 0; i < frameCount; i++) {
       spriteW.uint32((2 << 3) | 2).bytes(staticFrame);
@@ -725,7 +726,7 @@ function buildAnimatedWatermarkSprite(
     const state = computeAnimationState(animation, i, wmDims, basePos, viewbox);
     const transform = makeFrameTransform(basePos, wmDims, state);
     const alpha = baseAlpha * state.alphaMultiplier;
-    spriteW.uint32((2 << 3) | 2).bytes(buildFrameBytes(transform, alpha));
+    spriteW.uint32((2 << 3) | 2).bytes(buildFrameBytes(transform, alpha, wmDims));
   }
   return spriteW.finish();
 }
@@ -763,7 +764,24 @@ function makeFrameTransform(
   return { a, b, c, d, tx, ty };
 }
 
-function buildFrameBytes(transform: Transform, alpha: number): Uint8Array {
+function buildFrameBytes(
+  transform: Transform,
+  alpha: number,
+  dims: WatermarkDimensions,
+): Uint8Array {
+  // CRITICAL: the `layout` (field 2) sets the destination rectangle that
+  // native players (Flutter / Android / iOS SVGAPlayer) draw the bitmap
+  // into — they use `drawImageRect(bitmap, src, layoutRect)`. Without it,
+  // layout defaults to 0×0 and the watermark is drawn into nothing (it
+  // only showed in SVGAPlayer-Web, which ignores layout and uses the
+  // bitmap's native size). Set layout to the bitmap's native dimensions so
+  // it's a 1:1 draw, then the transform positions/scales it — matching how
+  // real SVGA exporters write frames.
+  // Layout: width = field 3, height = field 4 (x/y unused by players).
+  const layoutW = Writer.create();
+  layoutW.uint32((3 << 3) | 5).float(dims.width);
+  layoutW.uint32((4 << 3) | 5).float(dims.height);
+
   const transformW = Writer.create();
   transformW.uint32((1 << 3) | 5).float(transform.a);
   transformW.uint32((2 << 3) | 5).float(transform.b);
@@ -773,8 +791,9 @@ function buildFrameBytes(transform: Transform, alpha: number): Uint8Array {
   transformW.uint32((6 << 3) | 5).float(transform.ty);
 
   const frameW = Writer.create();
-  frameW.uint32((1 << 3) | 5).float(alpha);
-  frameW.uint32((3 << 3) | 2).bytes(transformW.finish());
+  frameW.uint32((1 << 3) | 5).float(alpha); // field 1: alpha
+  frameW.uint32((2 << 3) | 2).bytes(layoutW.finish()); // field 2: layout
+  frameW.uint32((3 << 3) | 2).bytes(transformW.finish()); // field 3: transform
   return frameW.finish();
 }
 
