@@ -137,6 +137,8 @@ export type BitmapInfo = {
 
 export type Plan = { key: string; mode: "swap" | "repaint"; region: Rect };
 
+export type PlanSource = "diff" | "manual" | "label" | "none";
+
 export type Analysis = {
   bitmaps: BitmapInfo[];
   /** The sibling that differed least, if any. */
@@ -144,6 +146,8 @@ export type Analysis = {
   /** How many same-design siblings contributed to the region. */
   siblingsUsed: number;
   plans: Plan[];
+  /** Where the plans came from — a measured diff, the user's own region, or a shape heuristic. */
+  source: PlanSource;
   reason: string;
 };
 
@@ -482,8 +486,8 @@ export async function analyzeMovie(
     });
   }
 
-  const { plans, reason } = suggestPlans(bitmaps, canvas, config);
-  return { bitmaps, sibling: chosen.sibling, siblingsUsed: chosen.used, plans, reason };
+  const { plans, source, reason } = suggestPlans(bitmaps, canvas, config);
+  return { bitmaps, sibling: chosen.sibling, siblingsUsed: chosen.used, plans, source, reason };
 }
 
 /**
@@ -498,14 +502,14 @@ export function suggestPlans(
   bitmaps: BitmapInfo[],
   canvas: { width: number; height: number },
   config: Pick<TextEditConfig, "target" | "mode" | "region">,
-): { plans: Plan[]; reason: string } {
+): { plans: Plan[]; source: PlanSource; reason: string } {
   const explicit = config.target !== "auto" ? bitmaps.find((b) => b.key === config.target) : null;
 
   if (explicit && config.region) {
-    return { plans: [{ key: explicit.key, mode: config.mode === "swap" ? "swap" : "repaint", region: config.region }], reason: "region set by hand" };
+    return { plans: [{ key: explicit.key, mode: config.mode === "swap" ? "swap" : "repaint", region: config.region }], source: "manual", reason: "region set by hand" };
   }
   if (explicit && config.mode === "swap" && explicit.ink) {
-    return { plans: [{ key: explicit.key, mode: "swap", region: explicit.ink }], reason: "swap chosen by hand" };
+    return { plans: [{ key: explicit.key, mode: "swap", region: explicit.ink }], source: "manual", reason: "swap chosen by hand" };
   }
 
   const pool = explicit ? [explicit] : bitmaps;
@@ -520,20 +524,20 @@ export function suggestPlans(
     }
   }
   if (plans.length) {
-    return { plans, reason: `differs from the sibling files in ${plans.length === 1 ? "one bitmap" : `${plans.length} bitmaps`}` };
+    return { plans, source: "diff", reason: `differs from the sibling files in ${plans.length === 1 ? "one bitmap" : `${plans.length} bitmaps`}` };
   }
 
   if (explicit && config.mode === "repaint") {
-    return { plans: [], reason: `"${explicit.key}" needs a region — no sibling shows where its text is` };
+    return { plans: [], source: "none", reason: `"${explicit.key}" needs a region — no sibling shows where its text is` };
   }
 
   const labels = pool
     .filter((b) => b.isBitmap && b.ink && b.frames >= b.totalFrames * 0.8 && looksLikeLabel(b.ink!, canvas, b.placement?.scale ?? 1))
     .sort((a, b) => a.ink!.width * a.ink!.height - b.ink!.width * b.ink!.height);
   if (labels.length) {
-    return { plans: [{ key: labels[0].key, mode: "swap", region: labels[0].ink! }], reason: "small, wide, on every frame — looks like a label" };
+    return { plans: [{ key: labels[0].key, mode: "swap", region: labels[0].ink! }], source: "label", reason: "small, wide, on every frame — looks like a label" };
   }
-  return { plans: [], reason: "no sibling to diff against and no label-shaped bitmap — add sibling files or set a region" };
+  return { plans: [], source: "none", reason: "no sibling to diff against and no label-shaped bitmap — add sibling files or set a region" };
 }
 
 /* ------------------------------------------------------------------ */

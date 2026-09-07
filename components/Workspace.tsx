@@ -115,8 +115,10 @@ export default function Workspace() {
           const g = guessRegion(a.bitmaps, textEdit.target === "auto" ? undefined : textEdit.target);
           if (g) setTextEdit((t) => ({ ...t, target: g.key, region: g.region, regionGuessed: true }));
         }
-        // A diff found the text after a guess was placed (siblings arrived): prefer the finding.
-        if (a.plans.length && textEdit.regionGuessed) {
+        // Siblings arrived after a guess was placed and a diff found the text:
+        // prefer the finding. Only a *diff* counts — the plan that a guessed
+        // region itself produces must not reset the guess, or it loops.
+        if (a.source === "diff" && textEdit.regionGuessed) {
           setTextEdit((t) => ({ ...t, target: "auto", region: null, regionGuessed: false }));
         }
       })
