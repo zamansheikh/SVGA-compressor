@@ -63,6 +63,8 @@ export type TextEditConfig = {
   mode: EditMode;
   /** Manual region inside the target bitmap; overrides detection. */
   region: Rect | null;
+  /** The region was placed by a guess, not by the user or a diff. */
+  regionGuessed: boolean;
   /** Image keys to drop entirely, with every sprite drawn from them. */
   remove: string[];
 };
@@ -91,8 +93,27 @@ export const defaultTextEdit: TextEditConfig = {
   target: "auto",
   mode: "auto",
   region: null,
+  regionGuessed: false,
   remove: [],
 };
+
+/**
+ * When nothing can be measured — one file, no siblings, a full-canvas
+ * badge — put a box where badge text usually is: the right part of the
+ * biggest always-visible bitmap. It is a starting point for dragging, and is
+ * labelled as a guess, never presented as a finding.
+ */
+export function guessRegion(bitmaps: BitmapInfo[], key?: string): { key: string; region: Rect } | null {
+  const pool = bitmaps.filter((b) => b.isBitmap && b.ink && (key ? b.key === key : b.frames >= b.totalFrames * 0.8));
+  if (!pool.length) return null;
+  const base = pool.sort((a, b) => b.ink!.width * b.ink!.height - a.ink!.width * a.ink!.height)[0];
+  const ink = base.ink!;
+  const wide = ink.width >= ink.height * 1.6;
+  const region = wide
+    ? { x: ink.x + ink.width * 0.55, y: ink.y + ink.height * 0.18, width: ink.width * 0.38, height: ink.height * 0.64 }
+    : { x: ink.x + ink.width * 0.2, y: ink.y + ink.height * 0.3, width: ink.width * 0.6, height: ink.height * 0.4 };
+  return { key: base.key, region: { x: Math.round(region.x), y: Math.round(region.y), width: Math.round(region.width), height: Math.round(region.height) } };
+}
 
 export type SiblingFile = { name: string; movie: MovieFile };
 
@@ -144,11 +165,14 @@ export async function decodeRaster(bytes: Uint8Array): Promise<Raster> {
   const mime = sniffImageMime(bytes);
   const blob = new Blob([bytes as BlobPart], { type: mime });
   const bmp = await createImageBitmap(blob);
-  const canvas = makeCanvas(bmp.width, bmp.height);
+  // Read the size before close(): a closed ImageBitmap reports 0x0, and
+  // getImageData(0,0,0,0) throws — which silently made every bitmap "not a bitmap".
+  const { width, height } = bmp;
+  const canvas = makeCanvas(width, height);
   const ctx = get2dCtx(canvas);
   ctx.drawImage(bmp, 0, 0);
   bmp.close?.();
-  const img = ctx.getImageData(0, 0, bmp.width, bmp.height);
+  const img = ctx.getImageData(0, 0, width, height);
   return { data: img.data, width: img.width, height: img.height };
 }
 

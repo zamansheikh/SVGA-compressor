@@ -20,12 +20,19 @@ type Props = {
   /** Bitmap dimensions, to clamp the box. */
   bitmap: { width: number; height: number };
   region: Rect;
-  /** True when this box is the detected suggestion, not a manual override. */
-  detected: boolean;
+  /** Found by a diff, placed by a guess, or set by the user. */
+  state: "detected" | "guess" | "manual";
   onChange: (r: Rect) => void;
 };
 
-export default function RegionOverlay({ anchorRef, viewbox, placement, bitmap, region, detected, onChange }: Props) {
+const STYLE = {
+  detected: { border: "border-emerald-400/90", chip: "bg-emerald-400 text-emerald-950", handle: "bg-emerald-400", label: "text found here" },
+  guess: { border: "border-amber-400/90 border-dashed", chip: "bg-amber-400 text-amber-950", handle: "bg-amber-400", label: "best guess — drag onto the text" },
+  manual: { border: "border-brand-400", chip: "bg-brand-400 text-white", handle: "bg-brand-400", label: "your region" },
+};
+
+export default function RegionOverlay({ anchorRef, viewbox, placement, bitmap, region, state, onChange }: Props) {
+  const look = STYLE[state];
   const [rect, setRect] = useState<DOMRect | null>(null);
   const drag = useRef<{ mode: "move" | "resize"; sx: number; sy: number; start: Rect } | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -112,11 +119,11 @@ export default function RegionOverlay({ anchorRef, viewbox, placement, bitmap, r
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
       onKeyDown={onKeyDown}
-      className={`absolute select-none cursor-move outline-none rounded-sm border-2 ${detected ? "border-emerald-400/90" : "border-brand-400"} focus:ring-2 focus:ring-white/40`}
+      className={`absolute select-none cursor-move outline-none rounded-sm border-2 ${look.border} focus:ring-2 focus:ring-white/40`}
       style={{ left, top, width, height, touchAction: "none", boxShadow: "0 0 0 9999px rgba(7,9,20,0.35)" }}
     >
-      <span className={`absolute -top-6 left-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium ${detected ? "bg-emerald-400 text-emerald-950" : "bg-brand-400 text-white"}`}>
-        {detected ? "text found here" : "your region"} · {Math.round(region.width)}×{Math.round(region.height)}
+      <span className={`absolute -top-6 left-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium ${look.chip}`}>
+        {look.label} · {Math.round(region.width)}×{Math.round(region.height)}
       </span>
       <div
         onPointerDown={onPointerDown("resize")}
@@ -124,7 +131,7 @@ export default function RegionOverlay({ anchorRef, viewbox, placement, bitmap, r
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         aria-hidden
-        className={`absolute -right-1.5 -bottom-1.5 h-3.5 w-3.5 rounded-sm cursor-nwse-resize ${detected ? "bg-emerald-400" : "bg-brand-400"}`}
+        className={`absolute -right-1.5 -bottom-1.5 h-3.5 w-3.5 rounded-sm cursor-nwse-resize ${look.handle}`}
         style={{ touchAction: "none" }}
       />
     </div>

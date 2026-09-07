@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { MovieFile } from "@/lib/svga";
 import {
   bitmapThumbnail,
+  guessRegion,
   LOOK_PRESETS,
   type Analysis,
   type LookPreset,
@@ -116,14 +117,20 @@ export default function TextEdit({ value, onChange, movie, siblings, otherFiles,
               {analyzing && <span className="text-[11px] text-white/40">looking…</span>}
             </div>
 
-            <Status analysis={analysis} siblings={siblings.length} otherFiles={otherFiles} />
+            <Status analysis={analysis} guessed={value.regionGuessed} siblings={siblings.length} otherFiles={otherFiles} />
 
             {analysis && (
               <BitmapGrid
                 movie={movie}
                 analysis={analysis}
                 selected={value.target}
-                onPick={(k) => onChange({ ...value, target: k, region: null })}
+                onPick={(k) => {
+                  // Picking a bitmap the diff knows nothing about still needs a
+                  // box to drag, so seed one inside that bitmap.
+                  const planned = analysis.plans.some((p) => p.key === k);
+                  const g = !planned && k !== "auto" ? guessRegion(analysis.bitmaps, k) : null;
+                  onChange({ ...value, target: k, region: g ? g.region : null, regionGuessed: !!g });
+                }}
               />
             )}
 
@@ -131,13 +138,15 @@ export default function TextEdit({ value, onChange, movie, siblings, otherFiles,
               <div className="mt-3 rounded-xl bg-white/5 p-3 space-y-2">
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-white/60">
-                    {value.region ? "Region set by hand" : plan ? `Detected · ${plan.mode}` : "No region yet"}
+                    {value.region ? (value.regionGuessed ? "Region is a guess" : "Region set by hand") : plan ? `Detected · ${plan.mode}` : "No region yet"}
                   </span>
                   <span className="font-mono text-white/70">{fmt(value.region ?? plan?.region ?? null)}</span>
                 </div>
-                <p className="text-[11px] text-white/40">Drag the box on the stage to adjust it. It stays on {target.key} ({target.width}×{target.height}).</p>
-                {value.region && (
-                  <button type="button" onClick={() => onChange({ ...value, region: null })} className="text-[11px] text-brand-300 hover:text-brand-200">
+                <p className="text-[11px] text-white/40">
+                  {value.regionGuessed ? "Drag the box on the stage onto the text." : "Drag the box on the stage to adjust it."} It stays on {target.key} ({target.width}×{target.height}).
+                </p>
+                {value.region && plan && !value.regionGuessed && (
+                  <button type="button" onClick={() => onChange({ ...value, region: null, regionGuessed: false })} className="text-[11px] text-brand-300 hover:text-brand-200">
                     Reset to detected
                   </button>
                 )}
@@ -194,9 +203,17 @@ export default function TextEdit({ value, onChange, movie, siblings, otherFiles,
   );
 }
 
-function Status({ analysis, siblings, otherFiles }: { analysis: Analysis | null; siblings: number; otherFiles: number }) {
+function Status({ analysis, guessed, siblings, otherFiles }: { analysis: Analysis | null; guessed: boolean; siblings: number; otherFiles: number }) {
   if (!analysis) return null;
   const ok = analysis.plans.length > 0;
+  if (guessed) {
+    return (
+      <div className="rounded-xl px-3 py-2 text-[11px] leading-relaxed bg-amber-500/10 text-amber-200">
+        <span className="font-medium">Guessing.</span> With only this file there is nothing to compare, so the box on the stage is a guess — drag it onto the text.
+        {siblings === 0 && <> Or add the other files from this set (level-41 … level-49 beside level-50) and it will be found exactly.</>}
+      </div>
+    );
+  }
   return (
     <div className={`rounded-xl px-3 py-2 text-[11px] leading-relaxed ${ok ? "bg-emerald-500/10 text-emerald-200" : "bg-amber-500/10 text-amber-200"}`}>
       {ok ? (

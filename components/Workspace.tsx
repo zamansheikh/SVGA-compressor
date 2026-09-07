@@ -11,7 +11,7 @@ import Watermark from "./Watermark";
 import { compressMovieImages, type CompressOptions } from "@/lib/compress";
 import { decodeSvga, dedupeImages, encodeSvga, paramsExtraFieldCount, stripParamsMetadata, type MovieFile } from "@/lib/svga";
 import { applyWatermark, defaultWatermark, type WatermarkConfig } from "@/lib/watermark";
-import { analyzeMovie, applyTextEdit, defaultTextEdit, isSibling, type Analysis, type Rect, type SiblingFile, type TextEditConfig } from "@/lib/text-edit";
+import { analyzeMovie, applyTextEdit, defaultTextEdit, guessRegion, isSibling, type Analysis, type Rect, type SiblingFile, type TextEditConfig } from "@/lib/text-edit";
 
 type Progress = { done: number; total: number; label: string };
 
@@ -59,7 +59,7 @@ export default function Workspace() {
     setEdited(null);
     setAnalysis(null);
     setEditError(null);
-    setTextEdit((t) => ({ ...t, target: "auto", region: null, remove: [] }));
+    setTextEdit((t) => ({ ...t, target: "auto", region: null, regionGuessed: false, remove: [] }));
     setView("original");
     jumpedToEdited.current = false;
   }, []);
@@ -106,7 +106,20 @@ export default function Workspace() {
     let cancelled = false;
     setAnalyzing(true);
     analyzeMovie(original, siblings, textEdit)
-      .then((a) => { if (!cancelled) setAnalysis(a); })
+      .then((a) => {
+        if (cancelled) return;
+        setAnalysis(a);
+        // Nothing measurable and nothing chosen: put a box somewhere sensible
+        // so there is something on the stage to drag, and say it is a guess.
+        if (!a.plans.length && !textEdit.region) {
+          const g = guessRegion(a.bitmaps, textEdit.target === "auto" ? undefined : textEdit.target);
+          if (g) setTextEdit((t) => ({ ...t, target: g.key, region: g.region, regionGuessed: true }));
+        }
+        // A diff found the text after a guess was placed (siblings arrived): prefer the finding.
+        if (a.plans.length && textEdit.regionGuessed) {
+          setTextEdit((t) => ({ ...t, target: "auto", region: null, regionGuessed: false }));
+        }
+      })
       .catch((e) => { if (!cancelled) setEditError((e as Error).message); })
       .finally(() => { if (!cancelled) setAnalyzing(false); });
     return () => { cancelled = true; };
@@ -210,10 +223,10 @@ export default function Workspace() {
     if (!rect) return null;
     return {
       rect,
-      detected: !textEdit.region,
+      state: !textEdit.region ? ("detected" as const) : textEdit.regionGuessed ? ("guess" as const) : ("manual" as const),
       placement: info.placement,
       bitmap: { width: info.width, height: info.height },
-      onChange: (r: Rect) => setTextEdit((t) => ({ ...t, target: key, region: r })),
+      onChange: (r: Rect) => setTextEdit((t) => ({ ...t, target: key, region: r, regionGuessed: false })),
     };
   }, [textEdit, analysis]);
 

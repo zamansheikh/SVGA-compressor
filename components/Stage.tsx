@@ -19,7 +19,7 @@ type Props = {
   /** Text-region editing, shown on the Original view. */
   region: {
     rect: Rect;
-    detected: boolean;
+    state: "detected" | "guess" | "manual";
     placement: { x: number; y: number; scale: number };
     bitmap: { width: number; height: number };
     onChange: (r: Rect) => void;
@@ -188,14 +188,14 @@ export default function Stage({ movies, view, onView, watermark, onWatermarkChan
               placement={region.placement}
               bitmap={region.bitmap}
               region={region.rect}
-              detected={region.detected}
+              state={region.state}
               onChange={region.onChange}
             />
           )}
         </div>
         {region && view !== "result" && (
           <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-[#070914]/80 backdrop-blur px-3 py-1 text-[11px] text-white/70 whitespace-nowrap">
-            Drag the box onto the text · corner to resize · arrow keys to nudge
+            {region.state === "guess" ? "That box is a guess — drag it onto the text" : "Drag the box onto the text"} · corner to resize · arrow keys to nudge
           </div>
         )}
       </div>
