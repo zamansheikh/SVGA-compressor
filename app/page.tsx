@@ -4,9 +4,9 @@ import Link from "next/link";
 export default function Home() {
   return (
     <main className="grid-bg relative min-h-dvh">
-      <div className="mx-auto w-full max-w-5xl px-4 sm:px-6 lg:px-8 py-8 sm:py-14">
+      <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
         {/* Header */}
-        <header className="flex items-center justify-between mb-10 sm:mb-14">
+        <header className="flex items-center justify-between mb-6 sm:mb-8">
           <div className="flex items-center gap-2.5">
             <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-brand-500 to-violet-500 grid place-items-center shadow-lg shadow-brand-500/30">
               <svg viewBox="0 0 24 24" className="h-5 w-5 fill-white" aria-hidden>
@@ -32,17 +32,19 @@ export default function Home() {
         </header>
 
         {/* Hero */}
-        <section className="mb-8 sm:mb-10">
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.05]">
-            Shrink <span className="gradient-text">.svga</span>
-            <br className="sm:hidden" /> animations,
-            <br />
-            in your browser.
+        <section className="mb-6 sm:mb-8">
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight leading-[1.05]">
+            Edit and shrink <span className="gradient-text">.svga</span> animations, in your browser.
           </h1>
-          <p className="mt-5 max-w-2xl text-base sm:text-lg text-white/60">
-            Upload an SVGA file, preview it, tune quality and scale, then download a smaller .svga.
-            Nothing is uploaded anywhere — all compression happens on-device.
+          <p className="mt-3 max-w-2xl text-sm sm:text-base text-white/60">
+            Drop a file, change the text painted into it, tune compression, download. Nothing is
+            uploaded anywhere.
           </p>
+          <ol className="mt-4 flex flex-wrap gap-x-6 gap-y-1 text-xs text-white/50">
+            <li><span className="text-white/80 font-medium">1</span> Drop a file — or the whole set</li>
+            <li><span className="text-white/80 font-medium">2</span> Type the new text, drag the box if needed</li>
+            <li><span className="text-white/80 font-medium">3</span> Build, check the Result view, download</li>
+          </ol>
         </section>
 
         {/* Tool */}
@@ -87,6 +89,13 @@ export default function Home() {
           <Faq q="Will the output still play in my player?">
             If your player is SVGAPlayer 2.x on Android / iOS / Web, WebP embeds are supported.
             If you target older players, choose PNG to stay fully lossless and compatible.
+          </Faq>
+          <Faq q="How does replacing text work?">
+            The tool finds where the text lives by diffing the file against its siblings — other
+            files from the same set with different text. If the text is its own bitmap it is
+            re-rendered and swapped; if it is painted into a larger bitmap, the background is
+            painted back over it first and the new text drawn on top. The original colour is
+            sampled unless you choose a look.
           </Faq>
           <Faq q="Is SVG supported?">
             No — this tool is specifically for SVGA (animation). For static SVG files, use a

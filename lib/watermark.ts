@@ -803,7 +803,7 @@ export function textFont(size: number): string {
   return `bold ${size}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
 }
 
-function makeCanvas(w: number, h: number): HTMLCanvasElement | OffscreenCanvas {
+export function makeCanvas(w: number, h: number): HTMLCanvasElement | OffscreenCanvas {
   if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(w, h);
   const c = document.createElement("canvas");
   c.width = w;
@@ -811,7 +811,7 @@ function makeCanvas(w: number, h: number): HTMLCanvasElement | OffscreenCanvas {
   return c;
 }
 
-function get2dCtx(
+export function get2dCtx(
   canvas: HTMLCanvasElement | OffscreenCanvas,
 ): CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D {
   const ctx = canvas.getContext("2d") as
@@ -822,7 +822,7 @@ function get2dCtx(
   return ctx;
 }
 
-async function canvasToPngBytes(
+export async function canvasToPngBytes(
   canvas: HTMLCanvasElement | OffscreenCanvas,
 ): Promise<Uint8Array> {
   let blob: Blob;

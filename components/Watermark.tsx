@@ -17,9 +17,11 @@ type Props = {
   value: WatermarkConfig;
   onChange: (v: WatermarkConfig) => void;
   disabled?: boolean;
+  /** Render without the card chrome, for use inside a tab. */
+  bare?: boolean;
 };
 
-export default function Watermark({ value, onChange, disabled }: Props) {
+export default function Watermark({ value, onChange, disabled, bare }: Props) {
   const setSource = (next: TextWatermark | ImageWatermark) =>
     onChange({ ...value, source: next });
 
@@ -53,7 +55,7 @@ export default function Watermark({ value, onChange, disabled }: Props) {
   );
 
   return (
-    <div className="glass rounded-2xl p-5 space-y-5">
+    <div className={bare ? "space-y-5" : "glass rounded-2xl p-5 space-y-5"}>
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-medium text-white">Watermark</h3>

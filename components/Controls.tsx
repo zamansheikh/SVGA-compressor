@@ -6,14 +6,18 @@ type Props = {
   value: CompressOptions;
   onChange: (v: CompressOptions) => void;
   disabled?: boolean;
+  /** Unknown header fields found in the loaded file. */
+  metadataFields?: number;
+  /** Render without the card chrome, for use inside a tab. */
+  bare?: boolean;
 };
 
-export default function Controls({ value, onChange, disabled }: Props) {
+export default function Controls({ value, onChange, disabled, metadataFields = 0, bare }: Props) {
   const isPng = value.format === "png";
   const isLossless = isPng && value.colors === 0;
 
   return (
-    <div className="glass rounded-2xl p-5 space-y-5">
+    <div className={bare ? "space-y-5" : "glass rounded-2xl p-5 space-y-5"}>
       <div>
         <span className="block text-sm font-medium text-white/80 mb-2">Image format</span>
         <div className="grid grid-cols-3 gap-2">
@@ -124,6 +128,35 @@ export default function Controls({ value, onChange, disabled }: Props) {
           always preserved, so the output plays identically to the original
           in every SVGA player — no position or size changes.
         </p>
+      </div>
+
+      <div className="border-t border-white/5 pt-4 space-y-3">
+        <label className={`flex items-center gap-2 cursor-pointer text-xs text-white/70 ${disabled ? "opacity-60 cursor-not-allowed" : ""}`}>
+          <input
+            type="checkbox"
+            checked={value.dedupe}
+            onChange={(e) => onChange({ ...value, dedupe: e.target.checked })}
+            disabled={disabled}
+            className="h-4 w-4 accent-brand-500"
+          />
+          Merge identical bitmaps
+          <span className="text-white/40">— exporters often embed the same PNG under several keys</span>
+        </label>
+        <label className={`flex items-center gap-2 cursor-pointer text-xs text-white/70 ${disabled ? "opacity-60 cursor-not-allowed" : ""}`}>
+          <input
+            type="checkbox"
+            checked={value.stripMetadata}
+            onChange={(e) => onChange({ ...value, stripMetadata: e.target.checked })}
+            disabled={disabled}
+            className="h-4 w-4 accent-brand-500"
+          />
+          Strip exporter metadata
+          <span className="text-white/40">
+            {metadataFields > 0
+              ? `— this file carries ${metadataFields} hidden header tag${metadataFields === 1 ? "" : "s"} (tool, author email, timestamp)`
+              : "— removes hidden header tags some exporters add (tool, author email, timestamp)"}
+          </span>
+        </label>
       </div>
     </div>
   );

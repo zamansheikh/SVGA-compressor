@@ -4,17 +4,37 @@ import protobuf from "protobufjs";
 import { decodeSvga, sniffImageMime, type MovieFile } from "./svga";
 import { SVGA_SPRITE_PROTO } from "./svga-proto";
 
-type Frame = {
+export type Frame = {
   alpha: number;
   transform: { a: number; b: number; c: number; d: number; tx: number; ty: number };
   layout: { x: number; y: number; width: number; height: number };
   clipPath: string;
 };
 
-type Sprite = {
+export type Sprite = {
   imageKey: string;
   frames: Frame[];
 };
+
+/**
+ * Decode every sprite's frames. Shared by the renderer and the text editor,
+ * which needs to know where each bitmap is placed and on which frames.
+ * Sprites that don't fit the minimal schema are skipped, not fatal.
+ */
+export async function decodeSprites(movie: MovieFile): Promise<Sprite[]> {
+  const SpriteType = await getSpriteType();
+  const sprites: Sprite[] = [];
+  for (const raw of movie.spriteBytes) {
+    try {
+      const msg = SpriteType.decode(raw);
+      const obj = SpriteType.toObject(msg, { defaults: true }) as { imageKey?: string; frames?: Frame[] };
+      sprites.push(normalizeSprite(obj));
+    } catch {
+      // exotic sprite — leave it out of the preview
+    }
+  }
+  return sprites;
+}
 
 export type Renderer = {
   canvas: HTMLCanvasElement;
@@ -58,20 +78,7 @@ export async function createRendererFromMovie(
   const { viewBoxWidth, viewBoxHeight, fps, frames } = movie.params;
 
   // Decode each sprite individually so one bad sprite doesn't kill the whole preview.
-  const SpriteType = await getSpriteType();
-  const sprites: Sprite[] = [];
-  for (const raw of movie.spriteBytes) {
-    try {
-      const msg = SpriteType.decode(raw);
-      const obj = SpriteType.toObject(msg, { defaults: true }) as {
-        imageKey?: string;
-        frames?: Frame[];
-      };
-      sprites.push(normalizeSprite(obj));
-    } catch {
-      // Skip sprites that don't match our minimal schema; preview still renders the rest.
-    }
-  }
+  const sprites = await decodeSprites(movie);
 
   // Load images
   const imageMap = new Map<string, ImageBitmap | HTMLImageElement>();

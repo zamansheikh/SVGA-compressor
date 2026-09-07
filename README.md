@@ -8,7 +8,10 @@ Built with Next.js 15, React 19, TypeScript, Tailwind. Deploys to Vercel in one 
 
 ## Features
 
-- Drag-and-drop upload (or tap on mobile)
+- Drag-and-drop upload (or tap on mobile) — drop a whole set of files at once
+- **Replace the text** painted into an animation (a level number, a rank label) — see below
+- Remove a bitmap and every sprite drawn from it
+- Merge identical bitmaps; strip hidden exporter metadata (tool, author email, timestamp)
 - Side-by-side original vs compressed preview, with play/pause/seek
 - Quality (1–100), scale (25–100%), and output format (WebP / PNG / JPEG) controls
 - File-size stats and per-image progress
@@ -54,6 +57,48 @@ Or just:
 npx vercel
 ```
 
+## Layout
+
+Three columns. **Files** on the left lists everything you dropped and marks
+which ones are siblings of the file being edited. The **Stage** in the middle
+is one large player with three views — *Original*, *Edited* (your text, live),
+*Result* (what you will download); keys 1/2/3 switch, space plays. The
+**Inspector** on the right has three tabs — *Text*, *Compress*, *Watermark* —
+and a footer with before/after size and a single *Build → Download* action.
+When the text has been located, its region is drawn on the stage as a box you
+can drag and resize.
+
+## Replacing text
+
+Open a file, type the new text in the *Text* tab. The stage switches to
+*Edited* and updates as you type; *Build result* bakes it into the download.
+
+Where the text lives is *measured*, not guessed. Two kinds of file exist:
+
+- **the text is its own bitmap** — a small label sprite placed over the badge.
+  It is re-rendered at the same size and swapped. Nothing else changes.
+- **the text is painted into a larger bitmap** — digits baked onto the pill.
+  The digit region is located, the pill is painted back over it, and the new
+  text is drawn on top.
+
+To locate it, drop the file's **siblings** — other files from the same export
+with different text (`level-41.svga` … `level-49.svga` beside `level-50.svga`).
+Dropping the whole set onto the main dropzone does this automatically; a
+picker lets you choose which one to edit. The bitmap that differs between
+siblings is the one carrying text, and the union of the differing pixels is
+where it sits. Every sibling is tried and the one that differs least wins —
+a file from a different colour band lights up the whole badge and is
+discarded. Transparent pixels are ignored (their colour is undefined and
+varies between exports), and re-encoding noise is thresholded away.
+
+Without siblings, a label-shaped bitmap is swapped; anything else needs a
+bitmap picked and a region set by hand.
+
+The new text takes the old text's colour, sampled from the bitmap, unless you
+pick a look (gold, silver, white with outline, …) or set your own. Text is set
+in the system font through Canvas, and the edited bitmap goes through the
+same compression as the rest.
+
 ## How compression works
 
 1. Read the uploaded `.svga` file.
@@ -66,7 +111,10 @@ npx vercel
 5. Offer the result as `filename.min.svga`.
 
 Animation timing, sprite transforms and shape layers are preserved exactly — only the embedded
-bitmap images are touched.
+bitmap images are touched. With **Merge identical bitmaps** on, byte-identical images are
+stored once and their sprites re-pointed. **Strip exporter metadata** drops unknown header
+fields — some exporters put a base64 JSON tag there with the tool name, author email and
+timestamp.
 
 ## Compatibility
 

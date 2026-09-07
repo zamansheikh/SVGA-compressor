@@ -297,7 +297,7 @@ export function rescaleSpriteTransforms(
   return writer.finish();
 }
 
-function readSpriteImageKey(spriteBytes: Uint8Array): string {
+export function readSpriteImageKey(spriteBytes: Uint8Array): string {
   const r = Reader.create(spriteBytes);
   while (r.pos < r.len) {
     const tag = r.uint32();
@@ -307,6 +307,119 @@ function readSpriteImageKey(spriteBytes: Uint8Array): string {
     r.skipType(wt);
   }
   return "";
+}
+
+/**
+ * Re-point a sprite at a different bitmap (imageKey, and matteKey when it
+ * is being merged too). Every other field passes through byte-for-byte.
+ */
+export function rewriteSpriteKeys(spriteBytes: Uint8Array, remap: Map<string, string>): Uint8Array {
+  const reader = Reader.create(spriteBytes);
+  const writer = Writer.create();
+  while (reader.pos < reader.len) {
+    const tag = reader.uint32();
+    const f = tag >>> 3;
+    const wt = tag & 7;
+    if ((f === 1 || f === 3) && wt === 2) {
+      const key = reader.string();
+      writer.uint32(tag).string(remap.get(key) ?? key);
+    } else if (wt === 2) {
+      writer.uint32(tag).bytes(reader.bytes());
+    } else if (wt === 0) {
+      writer.uint32(tag).int64(reader.int64());
+    } else if (wt === 1) {
+      writer.uint32(tag).fixed64(reader.fixed64());
+    } else if (wt === 5) {
+      writer.uint32(tag).fixed32(reader.fixed32());
+    } else {
+      reader.skipType(wt);
+    }
+  }
+  return writer.finish();
+}
+
+/* ----------------------------------------------------------------------------
+ * Compressor extras: dedupe + metadata
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Store byte-identical bitmaps once and re-point the sprites that used the
+ * duplicates. Exporters often embed the same PNG under several keys.
+ */
+export function dedupeImages(movie: MovieFile): { movie: MovieFile; merged: number } {
+  const keys = Object.keys(movie.images);
+  const survivors: { key: string; bytes: Uint8Array }[] = [];
+  const remap = new Map<string, string>();
+  for (const key of keys) {
+    const bytes = movie.images[key];
+    const twin = survivors.find((s) => s.bytes.byteLength === bytes.byteLength && bytesEqual(s.bytes, bytes));
+    if (twin) remap.set(key, twin.key);
+    else survivors.push({ key, bytes });
+  }
+  if (!remap.size) return { movie, merged: 0 };
+  const images: Record<string, Uint8Array> = {};
+  for (const s of survivors) images[s.key] = s.bytes;
+  const spriteBytes = movie.spriteBytes.map((s) => {
+    const key = readSpriteImageKey(s);
+    return remap.has(key) ? rewriteSpriteKeys(s, remap) : s;
+  });
+  return { movie: { ...movie, images, spriteBytes }, merged: remap.size };
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  for (let i = 0; i < a.byteLength; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/** How many fields beyond the four the schema defines sit in MovieParams. */
+export function paramsExtraFieldCount(paramsBytes: Uint8Array): number {
+  let n = 0;
+  try {
+    const r = Reader.create(paramsBytes);
+    while (r.pos < r.len) {
+      const tag = r.uint32();
+      const f = tag >>> 3;
+      r.skipType(tag & 7);
+      if (f < 1 || f > 4) n++;
+    }
+  } catch {
+    /* tolerate */
+  }
+  return n;
+}
+
+/**
+ * Drop unknown MovieParams fields. Some exporters put a base64 JSON tag there
+ * with the tool name, author email and timestamp — provenance to some,
+ * a tracking tag to others.
+ */
+export function stripParamsMetadata(paramsBytes: Uint8Array): { bytes: Uint8Array; removed: number } {
+  const reader = Reader.create(paramsBytes);
+  const writer = Writer.create();
+  let removed = 0;
+  while (reader.pos < reader.len) {
+    const tag = reader.uint32();
+    const f = tag >>> 3;
+    const wt = tag & 7;
+    const keep = f >= 1 && f <= 4;
+    if (!keep) removed++;
+    if (wt === 2) {
+      const b = reader.bytes();
+      if (keep) writer.uint32(tag).bytes(b);
+    } else if (wt === 0) {
+      const v = reader.int64();
+      if (keep) writer.uint32(tag).int64(v);
+    } else if (wt === 1) {
+      const v = reader.fixed64();
+      if (keep) writer.uint32(tag).fixed64(v);
+    } else if (wt === 5) {
+      const v = reader.fixed32();
+      if (keep) writer.uint32(tag).fixed32(v);
+    } else {
+      reader.skipType(wt);
+    }
+  }
+  return { bytes: writer.finish(), removed };
 }
 
 function rewriteFrame(frameBytes: Uint8Array, invSx: number, invSy: number): Uint8Array {

@@ -25,6 +25,10 @@ export type CompressOptions = {
    * (smaller, slight visible quality loss). Only applies when format === "png".
    */
   colors: number;
+  /** Store byte-identical bitmaps once and re-point their sprites. */
+  dedupe: boolean;
+  /** Drop unknown MovieParams fields (exporter tags: tool, author, timestamp). */
+  stripMetadata: boolean;
 };
 
 export type CompressProgress = (done: number, total: number, label: string) => void;

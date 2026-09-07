@@ -3,25 +3,29 @@
 import { useCallback, useRef, useState } from "react";
 
 type Props = {
-  onFile: (file: File) => void;
+  /** The first file is the one to work on; the rest are siblings. */
+  onFiles: (files: File[]) => void;
   disabled?: boolean;
 };
 
-export default function Dropzone({ onFile, disabled }: Props) {
+export default function Dropzone({ onFiles, disabled }: Props) {
   const [isOver, setIsOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFiles = useCallback(
-    (files: FileList | null) => {
-      if (!files || !files.length) return;
-      const file = files[0];
-      if (!/\.svga$/i.test(file.name)) {
-        alert("Please choose a .svga file. SVG files are not supported by this tool.");
+    (list: FileList | null) => {
+      if (!list || !list.length) return;
+      const files = Array.from(list).filter((f) => /\.svga$/i.test(f.name));
+      if (!files.length) {
+        alert("Please choose .svga files. SVG files are not supported by this tool.");
         return;
       }
-      onFile(file);
+      // Stable order so "level-41 … level-50" lands with the last one first
+      // isn't a surprise: sort by name, the user picks which is the target.
+      files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      onFiles(files);
     },
-    [onFile],
+    [onFiles],
   );
 
   return (
@@ -44,6 +48,7 @@ export default function Dropzone({ onFile, disabled }: Props) {
         ref={inputRef}
         type="file"
         accept=".svga"
+        multiple
         className="sr-only"
         onChange={(e) => handleFiles(e.target.files)}
         disabled={disabled}
@@ -63,6 +68,9 @@ export default function Dropzone({ onFile, disabled }: Props) {
           Drop your <span className="gradient-text">.svga</span> file here
         </h2>
         <p className="mt-1 text-sm text-white/60">or tap to browse — files never leave your device</p>
+        <p className="mt-1 text-xs text-white/40">
+          Drop a whole set (level-41 … level-50) to edit the text in one of them.
+        </p>
 
         <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs text-white/70">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
