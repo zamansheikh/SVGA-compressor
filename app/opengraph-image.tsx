@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 
 export const dynamic = "force-dynamic";
-export const alt = "SVGA Compressor — shrink .svga animations in your browser";
+export const alt = "SVGA Studio — compress and edit .svga animations in your browser";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -41,7 +41,7 @@ export default async function Image() {
             S
           </div>
           <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={{ fontSize: 24, fontWeight: 600 }}>SVGA Compressor</div>
+            <div style={{ fontSize: 24, fontWeight: 600 }}>SVGA Studio</div>
             <div style={{ fontSize: 16, opacity: 0.6 }}>
               client-side · no uploads · free
             </div>

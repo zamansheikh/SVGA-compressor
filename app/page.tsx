@@ -14,7 +14,7 @@ export default function Home() {
               </svg>
             </div>
             <div className="leading-tight">
-              <div className="text-sm font-semibold tracking-tight">SVGA Compressor</div>
+              <div className="text-sm font-semibold tracking-tight">SVGA Studio</div>
               <div className="text-[11px] text-white/50">for .svga animations</div>
             </div>
           </div>
@@ -112,7 +112,7 @@ export default function Home() {
             </Link>{" "}
             in one click.
           </div>
-          <div>© {new Date().getFullYear()} SVGA Compressor</div>
+          <div>© {new Date().getFullYear()} SVGA Studio</div>
         </footer>
       </div>
     </main>

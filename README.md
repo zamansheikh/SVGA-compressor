@@ -1,6 +1,9 @@
-# SVGA Compressor
+# SVGA Studio
 
-Modern, 100% client-side compressor for **SVGA 2.x** animation files (`.svga`).
+Modern, 100% client-side studio for **SVGA 2.x** animation files (`.svga`): preview,
+compress, watermark, and replace the text baked into a badge — in the original lettering.
+
+Formerly *SVGA Compressor*; the old repository URL redirects here.
 Built with Next.js 15, React 19, TypeScript, Tailwind. Deploys to Vercel in one click.
 
 > Note: this is for **SVGA** (bitmap-based animation format used by live-streaming gift effects,
@@ -96,6 +99,19 @@ Two kinds of edit follow:
 - **the text is painted into a larger bitmap** — digits baked onto the pill.
   The region is painted back over from its surroundings and the new text is
   drawn on top, in the colour the old text had.
+
+**Lettering.** When a numbered set is loaded (level-41 … level-50), the
+digits are lifted from the files themselves — background rebuilt from the
+siblings, each glyph as an anti-aliased mask with its colour and shadow — and
+the new number is composed from them, centred where the originals sit. The
+result is the set's own font, pixel for pixel. Switch to *A font* to draw any
+text with a system font instead; that is also what happens when the names
+carry no numbers.
+
+**Series.** *Make a series* takes a range or list (`1-20`, `5, 10, 15`) and
+builds one file per value with the current lettering, compression and
+watermark settings, named after the active file (level-41 → level-7), as a
+zip.
 
 Whatever was found, the box on the stage can be dragged and resized. A box
 moved by hand keeps the companion layers found for that bitmap, so the shadow

@@ -12,6 +12,7 @@ import { compressMovieImages, type CompressOptions } from "@/lib/compress";
 import { decodeSvga, dedupeImages, encodeSvga, paramsExtraFieldCount, stripParamsMetadata, type MovieFile } from "@/lib/svga";
 import { applyWatermark, defaultWatermark, type WatermarkConfig } from "@/lib/watermark";
 import { analyzeMovie, applyTextEdit, defaultTextEdit, guessRegion, isSibling, type Analysis, type Rect, type SiblingFile, type TextEditConfig } from "@/lib/text-edit";
+import JSZip from "jszip";
 
 type Progress = { done: number; total: number; label: string };
 
@@ -105,7 +106,7 @@ export default function Workspace() {
     if (!original || !textEdit.enabled) { setAnalysis(null); return; }
     let cancelled = false;
     setAnalyzing(true);
-    analyzeMovie(original, siblings, textEdit)
+    analyzeMovie(original, siblings, textEdit, activeFile?.name ?? "")
       .then((a) => {
         if (cancelled) return;
         setAnalysis(a);
@@ -197,6 +198,45 @@ export default function Workspace() {
     }
   }, [original, siblings, textEdit, analysis, options, watermark, signature]);
 
+  /**
+   * Build one file per value with the current settings — same look, same
+   * compression, same watermark — and download them as a zip. Names follow
+   * the active file: level-41.svga with "7" becomes level-7.svga.
+   */
+  const buildSeries = useCallback(async (values: string[]) => {
+    if (!original || !activeFile || !values.length) return;
+    setBuilding(true);
+    setError(null);
+    const zip = new JSZip();
+    const base = activeFile.name.replace(/\.svga$/i, "");
+    const nameFor = (v: string) => (/\d+(?!.*\d)/.test(base) ? base.replace(/\d+(?!.*\d)/, v) : `${base}-${v}`) + ".svga";
+    try {
+      for (const [i, value] of values.entries()) {
+        setProgress({ done: i, total: values.length, label: `Series · ${value}` });
+        const cfg: TextEditConfig = { ...textEdit, enabled: true, text: value };
+        let next = (await applyTextEdit(original, siblings, cfg, analysis ?? undefined)).movie;
+        next = await compressMovieImages(next, options, () => {});
+        if (options.dedupe) next = dedupeImages(next).movie;
+        if (options.stripMetadata) next = { ...next, paramsBytes: stripParamsMetadata(next.paramsBytes).bytes };
+        if (watermark.enabled) next = await applyWatermark(next, watermark);
+        zip.file(nameFor(value), await encodeSvga(next));
+      }
+      setProgress({ done: values.length, total: values.length, label: "Zipping" });
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${base.replace(/[-_ ]?\d+(?!.*\d)/, "")}-${values[0]}-${values[values.length - 1]}.zip`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBuilding(false);
+      setProgress(null);
+    }
+  }, [original, activeFile, siblings, textEdit, analysis, options, watermark]);
+
   const downloadName = useMemo(() => {
     if (!activeFile) return null;
     const base = activeFile.name.replace(/\.svga$/i, "");
@@ -269,7 +309,7 @@ export default function Workspace() {
           active={{ text: textEdit.enabled && !!textEdit.text.trim(), watermark: watermark.enabled, compress: true }}
           panels={{
             text: (
-              <TextEdit value={textEdit} onChange={setTextEdit} movie={original} siblings={siblings} otherFiles={files.length - 1} analysis={analysis} analyzing={analyzing} error={editError} disabled={building} />
+              <TextEdit value={textEdit} onChange={setTextEdit} movie={original} siblings={siblings} otherFiles={files.length - 1} analysis={analysis} analyzing={analyzing} error={editError} disabled={building} onSeries={buildSeries} />
             ),
             compress: <Controls value={options} onChange={setOptions} disabled={building} metadataFields={metadataFields} bare />,
             watermark: <Watermark value={watermark} onChange={setWatermark} disabled={building} bare />,

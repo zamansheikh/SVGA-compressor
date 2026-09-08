@@ -1,5 +1,5 @@
 {
-  "name": "svga-compressor",
+  "name": "svga-studio",
   "version": "1.2.0",
   "private": true,
   "description": "Modern in-browser SVGA animation compressor and editor — upload, preview, replace text, compress, download.",
@@ -11,14 +11,15 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "clsx": "2.1.1",
+    "framer-motion": "11.15.0",
+    "jszip": "^3.10.1",
     "next": "16.2.4",
-    "react": "19.2.5",
-    "react-dom": "19.2.5",
     "pako": "2.1.0",
     "protobufjs": "7.5.5",
-    "upng-js": "2.1.0",
-    "clsx": "2.1.1",
-    "framer-motion": "11.15.0"
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "upng-js": "2.1.0"
   },
   "devDependencies": {
     "@types/node": "25.6.0",

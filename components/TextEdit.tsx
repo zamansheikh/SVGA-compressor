@@ -24,7 +24,22 @@ type Props = {
   analyzing: boolean;
   error: string | null;
   disabled?: boolean;
+  /** Build one file per value and download them zipped. */
+  onSeries?: (values: string[]) => void;
 };
+
+/** "1-20, 25" → ["1", …, "20", "25"]; plain words pass through. */
+export function parseSeries(spec: string): string[] {
+  const out: string[] = [];
+  for (const part of spec.split(/[,\s]+/).map((p) => p.trim()).filter(Boolean)) {
+    const m = part.match(/^(\d+)-(\d+)$/);
+    if (m) {
+      const a = Number(m[1]), b = Number(m[2]);
+      if (b >= a && b - a < 1000) for (let n = a; n <= b; n++) out.push(String(n));
+    } else out.push(part);
+  }
+  return [...new Set(out)];
+}
 
 const PRESETS: { value: LookPreset; label: string; swatch: string }[] = [
   { value: "auto", label: "Match", swatch: "conic-gradient(from 0deg, #fff, #e39b12, #5890ff, #fff)" },
@@ -44,9 +59,12 @@ const fmt = (r: Rect | null) => (r ? `${Math.round(r.x)}, ${Math.round(r.y)} · 
  * should it look, where is it. The third is answered automatically when
  * siblings are loaded; the stage shows the answer as a box you can move.
  */
-export default function TextEdit({ value, onChange, movie, siblings, otherFiles, analysis, analyzing, error, disabled }: Props) {
+export default function TextEdit({ value, onChange, movie, siblings, otherFiles, analysis, analyzing, error, disabled, onSeries }: Props) {
   const setLook = (next: Partial<TextLook>) => onChange({ ...value, look: { ...value.look, ...next } });
   const [advanced, setAdvanced] = useState(false);
+  const [series, setSeries] = useState("");
+  const seriesValues = parseSeries(series);
+  const usingGlyphs = value.font === "set" && !!analysis?.glyphs && !value.region;
 
   const plan = analysis?.plans[0] ?? null;
   const targetKey = value.target !== "auto" ? value.target : plan?.key ?? null;
@@ -76,9 +94,33 @@ export default function TextEdit({ value, onChange, movie, siblings, otherFiles,
 
       {value.enabled && (
         <>
+          {/* Lettering: the set's own glyphs, or a font */}
+          {(analysis?.glyphs || analysis?.glyphsNote) && (
+            <div>
+              <div className="text-sm font-medium text-white/80 mb-2">Lettering</div>
+              {analysis.glyphs ? (
+                <div className="flex gap-1 rounded-lg bg-white/5 p-1" role="radiogroup" aria-label="Lettering">
+                  {([["set", "This set's own digits"], ["render", "A font"]] as const).map(([id, label]) => (
+                    <button key={id} type="button" role="radio" aria-checked={value.font === id} disabled={disabled} onClick={() => onChange({ ...value, font: id })}
+                      className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition ${value.font === id ? "bg-white text-[#070914] shadow" : "text-white/70 hover:text-white hover:bg-white/10"}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <p className="mt-1.5 text-[11px] text-white/45">
+                {analysis.glyphs
+                  ? value.font === "set"
+                    ? `Pixel-exact: ${analysis.glyphsNote}. Only those characters can be written; the box cannot be moved.`
+                    : "Drawn with a system font in the look chosen below."
+                  : analysis.glyphsNote}
+              </p>
+            </div>
+          )}
+
           {/* 2. Look */}
-          <div>
-            <div className="text-sm font-medium text-white/80 mb-2">Look</div>
+          <div className={usingGlyphs ? "opacity-40 pointer-events-none" : ""}>
+            <div className="text-sm font-medium text-white/80 mb-2">Look{usingGlyphs && <span className="ml-2 text-[11px] font-normal text-white/40">comes with the set's digits</span>}</div>
             <div className="grid grid-cols-4 gap-2">
               {PRESETS.map((p) => (
                 <button
@@ -151,6 +193,25 @@ export default function TextEdit({ value, onChange, movie, siblings, otherFiles,
                     Reset to detected
                   </button>
                 )}
+              </div>
+            )}
+
+            {/* Series: many files in one go */}
+            {onSeries && (
+              <div className="mt-4 rounded-xl bg-white/5 p-3">
+                <div className="flex items-baseline justify-between mb-1.5">
+                  <span className="text-sm font-medium text-white/80">Make a series</span>
+                  <span className="text-[11px] text-white/40">{seriesValues.length ? `${seriesValues.length} file${seriesValues.length === 1 ? "" : "s"}` : "e.g. 1-20 or 5, 10, 15"}</span>
+                </div>
+                <div className="flex gap-2">
+                  <input type="text" value={series} onChange={(e) => setSeries(e.target.value)} disabled={disabled} placeholder="1-20" aria-label="Series values"
+                    className="min-w-0 flex-1 rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm text-white placeholder-white/25 focus:outline-none focus:ring-2 focus:ring-brand-500/40" />
+                  <button type="button" disabled={disabled || !seriesValues.length || !analysis?.plans.length} onClick={() => onSeries(seriesValues)}
+                    className="rounded-lg bg-brand-500 hover:bg-brand-400 disabled:opacity-40 disabled:cursor-not-allowed px-3 py-2 text-sm font-medium text-white transition whitespace-nowrap">
+                    Build zip
+                  </button>
+                </div>
+                <p className="mt-1.5 text-[11px] text-white/40">One file per value with these settings, named after this file (level-41 → level-7), zipped.</p>
               </div>
             )}
 

@@ -1,7 +1,7 @@
 {
-  "name": "SVGA Compressor",
+  "name": "SVGA Studio",
   "short_name": "SVGA",
-  "description": "Upload, preview and compress SVGA animation files in your browser.",
+  "description": "Preview, compress, watermark and edit SVGA animation files in your browser.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -6,14 +6,16 @@ const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://svga-compressor.ver
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "SVGA Compressor — Shrink .svga animations in your browser",
-    template: "%s · SVGA Compressor",
+    default: "SVGA Studio — Compress and edit .svga animations in your browser",
+    template: "%s · SVGA Studio",
   },
   description:
-    "Upload, preview and compress SVGA animation files (.svga) entirely in your browser. No uploads to any server, no sign-up, free.",
+    "Preview, compress, watermark and edit the text of SVGA animation files (.svga) entirely in your browser. No uploads to any server, no sign-up, free.",
   keywords: [
     "SVGA",
     "SVGA compressor",
+    "SVGA editor",
+    "edit svga text",
     "svga shrink",
     "svga optimizer",
     "animation compressor",
@@ -22,9 +24,9 @@ export const metadata: Metadata = {
     "gift animation",
     "live stream animation",
   ],
-  authors: [{ name: "SVGA Compressor" }],
-  creator: "SVGA Compressor",
-  applicationName: "SVGA Compressor",
+  authors: [{ name: "SVGA Studio" }],
+  creator: "SVGA Studio",
+  applicationName: "SVGA Studio",
   category: "utilities",
   icons: {
     icon: [
@@ -39,17 +41,17 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     url: siteUrl,
-    siteName: "SVGA Compressor",
-    title: "SVGA Compressor — Shrink .svga animations in your browser",
+    siteName: "SVGA Studio",
+    title: "SVGA Studio — Compress and edit .svga animations in your browser",
     description:
-      "Upload, preview and compress SVGA animation files (.svga) entirely in your browser. No uploads, no sign-up.",
+      "Preview, compress, watermark and edit the text of SVGA animations (.svga) entirely in your browser. No uploads, no sign-up.",
     locale: "en_US",
   },
   twitter: {
     card: "summary_large_image",
-    title: "SVGA Compressor",
+    title: "SVGA Studio",
     description:
-      "Upload, preview and compress SVGA animations in your browser. 100% client-side.",
+      "Compress and edit SVGA animations in your browser. 100% client-side.",
   },
   robots: {
     index: true,

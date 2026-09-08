@@ -4,6 +4,7 @@ import type { MovieFile } from "./svga";
 import { sniffImageMime } from "./svga";
 import { decodeSprites, parseSvgPath, type Sprite } from "./renderer";
 import { canvasToPngBytes, get2dCtx, makeCanvas } from "./watermark";
+import { buildGlyphLibrary, textFromName, type GlyphLibrary, type GlyphSample } from "./glyphs";
 
 /**
  * Replace the text painted into an SVGA — a level number, a rank label, the
@@ -50,6 +51,8 @@ export type TextLook = {
 };
 
 export type EditMode = "auto" | "swap" | "repaint";
+/** "set": the set's own glyphs lifted from sibling files (exact); "render": draw with a font. */
+export type FontMode = "set" | "render";
 
 export type TextEditConfig = {
   enabled: boolean;
@@ -64,6 +67,8 @@ export type TextEditConfig = {
   regionGuessed: boolean;
   /** Image keys to drop entirely, with every sprite drawn from them. */
   remove: string[];
+  /** Which lettering to use when a set of siblings is loaded. */
+  font: FontMode;
 };
 
 export const LOOK_PRESETS: Record<Exclude<LookPreset, "auto" | "custom">, Partial<TextLook>> = {
@@ -84,6 +89,7 @@ export const defaultTextEdit: TextEditConfig = {
   region: null,
   regionGuessed: false,
   remove: [],
+  font: "set",
 };
 
 export type SiblingFile = { name: string; movie: MovieFile };
@@ -127,9 +133,12 @@ export type Analysis = {
   detectedOnFrame: number | null;
   /** Detected text that looks like real lettering, or a weaker candidate the user should check. */
   confidence: "high" | "low";
+  /** The set's own glyphs, when siblings with numbered names are loaded. */
+  glyphs: GlyphLibrary | null;
+  glyphsNote: string;
 };
 
-export type EditResult = { key: string; mode: "swap" | "repaint"; region: Rect; fill: string; fontSize: number; frames: number };
+export type EditResult = { key: string; mode: "swap" | "repaint" | "glyphs"; region: Rect; fill: string; fontSize: number; frames: number };
 
 /* ------------------------------------------------------------------ */
 /* Decoding + caches                                                     */
@@ -982,10 +991,10 @@ async function chooseSibling(movie: MovieFile, siblings: SiblingFile[], keys: st
     }
     if (regions.size && !mismatch) same.push({ name: s.name, regions, area });
   }
-  if (!same.length) return { sibling: null as string | null, regions: new Map<string, Rect>(), used: 0 };
+  if (!same.length) return { sibling: null as string | null, regions: new Map<string, Rect>(), used: 0, names: [] as string[] };
   const regions = new Map<string, Rect>();
   for (const e of same) for (const [k, r] of e.regions) regions.set(k, unionRect(regions.get(k), r));
-  return { sibling: same.reduce((a, b) => (b.area < a.area ? b : a)).name, regions, used: same.length };
+  return { sibling: same.reduce((a, b) => (b.area < a.area ? b : a)).name, regions, used: same.length, names: same.map((c) => c.name) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -996,6 +1005,8 @@ export async function analyzeMovie(
   movie: MovieFile,
   siblings: SiblingFile[],
   config: Pick<TextEditConfig, "target" | "mode" | "region"> = defaultTextEdit,
+  /** The active file's name — its digits tell which glyphs it carries. */
+  activeName = "",
 ): Promise<Analysis> {
   const canvas = { width: movie.params.viewBoxWidth, height: movie.params.viewBoxHeight };
   const usage = await imageUsage(movie);
@@ -1044,7 +1055,30 @@ export async function analyzeMovie(
       reason = `${d.confident ? "lettering" : "something text-like"} found on frame ${d.frame + 1}${info?.sequence ? ` — applies to all ${info.sequence.length} frames of that sequence` : ""}${d.companions.length ? `, plus ${d.companions.length} matching layer${d.companions.length > 1 ? "s" : ""}` : ""}`;
     }
   }
-  const analysis: Analysis = { bitmaps, sibling: chosen.sibling, siblingsUsed: chosen.used, plans, source, reason, detectedOnFrame, confidence };
+  // With a numbered set loaded, lift the set's own glyphs so new text can
+  // be written in exactly the original lettering.
+  let glyphs: GlyphLibrary | null = null;
+  let glyphsNote = "";
+  if (source === "diff" && plans.length === 1 && chosen.names.length) {
+    const key = plans[0].key;
+    const named = [{ name: activeName, movie }, ...siblings.filter((c) => chosen.names.includes(c.name))]
+      .map((f) => ({ text: textFromName(f.name), movie: f.movie }));
+    const usable = named.filter((f): f is { text: string; movie: MovieFile } => !!f.text);
+    if (!textFromName(activeName)) glyphsNote = "The file name carries no number, so the set's own digits can't be matched to it.";
+    else if (usable.length < 2) glyphsNote = "The sibling names carry no numbers, so their digits can't be told apart.";
+    else {
+      try {
+        const samples: GlyphSample[] = [];
+        for (const f of usable) { const r = await rasterOf(f.movie, key); if (r) samples.push({ text: f.text, raster: r }); }
+        const region = bitmaps.find((b) => b.key === key)?.diff ?? plans[0].region;
+        glyphs = buildGlyphLibrary(key, samples, region);
+        glyphsNote = `digits ${glyphs.chars.split("").join(" ")} lifted from ${samples.length} files`;
+      } catch (e) {
+        glyphsNote = `couldn't lift the set's glyphs: ${(e as Error).message}`;
+      }
+    }
+  }
+  const analysis: Analysis = { bitmaps, sibling: chosen.sibling, siblingsUsed: chosen.used, plans, source, reason, detectedOnFrame, confidence, glyphs, glyphsNote };
   if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") (window as unknown as { __svgaLast?: unknown }).__svgaLast = { movie, analysis };
   return analysis;
 }
@@ -1177,6 +1211,14 @@ export async function applyTextEdit(movie: MovieFile, siblings: SiblingFile[], c
   const images: Record<string, Uint8Array> = { ...out.images };
   const edits: EditResult[] = [];
   for (const plan of a.plans) {
+    if (config.font === "set" && a.glyphs && a.glyphs.key === plan.key && !config.region) {
+      const raw = await rasterOf(movie, plan.key);
+      if (raw) {
+        images[plan.key] = await rasterToPng(a.glyphs.compose(config.text.trim(), raw));
+        edits.push({ key: plan.key, mode: "glyphs", region: a.glyphs.band, fill: "", fontSize: 0, frames: 1 });
+        continue;
+      }
+    }
     let fill: string | null = null;
     let fontSize = 0;
     let done = 0;
@@ -1240,6 +1282,12 @@ function readSpriteImageKeyFast(bytes: Uint8Array): string {
     else if (wire === 0) varint(); else if (wire === 5) pos += 4; else if (wire === 1) pos += 8; else return "";
   }
   return "";
+}
+
+async function rasterToPng(r: Raster): Promise<Uint8Array> {
+  const canvas = makeCanvas(r.width, r.height);
+  get2dCtx(canvas).putImageData(new ImageData(r.data, r.width, r.height), 0, 0);
+  return canvasToPngBytes(canvas);
 }
 
 export async function bitmapThumbnail(movie: MovieFile, key: string, size = 96): Promise<string | null> {

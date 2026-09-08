@@ -45,7 +45,7 @@
   <!-- label -->
   <text x="200" y="120" font-family="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
         font-size="26" font-weight="600" fill="white" opacity="0.85">
-    SVGA Compressor
+    SVGA Studio
   </text>
   <text x="200" y="152" font-family="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
         font-size="18" font-weight="400" fill="white" opacity="0.55">
