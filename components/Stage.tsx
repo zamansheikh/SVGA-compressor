@@ -22,6 +22,8 @@ type Props = {
     state: "detected" | "guess" | "manual";
     placement: { x: number; y: number; scale: number };
     bitmap: { width: number; height: number };
+    /** A frame on which the target bitmap is visible, to park the player on. */
+    frame?: number;
     onChange: (r: Rect) => void;
   } | null;
   fileName: string;
@@ -59,7 +61,7 @@ export default function Stage({ movies, view, onView, watermark, onWatermarkChan
           setFrame(f);
         };
         setTotal(r.totalFrames);
-        r.seek(Math.min(lastFrame.current, r.totalFrames - 1));
+        r.seek(Math.min(region?.frame ?? lastFrame.current, r.totalFrames - 1));
         if (!region) {
           r.play();
           setPlaying(true);

@@ -143,7 +143,8 @@ export default function TextEdit({ value, onChange, movie, siblings, otherFiles,
                   <span className="font-mono text-white/70">{fmt(value.region ?? plan?.region ?? null)}</span>
                 </div>
                 <p className="text-[11px] text-white/40">
-                  {value.regionGuessed ? "Drag the box on the stage onto the text." : "Drag the box on the stage to adjust it."} It stays on {target.key} ({target.width}×{target.height}).
+                  {value.regionGuessed ? "Drag the box on the stage onto the text." : "Drag the box on the stage to adjust it."} It stays on {target.key} ({target.width}×{target.height})
+                  {target.sequence ? ` and the other ${target.sequence.length - 1} frames of its sequence` : ""}.
                 </p>
                 {value.region && plan && !value.regionGuessed && (
                   <button type="button" onClick={() => onChange({ ...value, region: null, regionGuessed: false })} className="text-[11px] text-brand-300 hover:text-brand-200">
@@ -214,12 +215,22 @@ function Status({ analysis, guessed, siblings, otherFiles }: { analysis: Analysi
       </div>
     );
   }
+  const frames = analysis.plans.reduce((n, p) => n + p.keys.length, 0);
+  if (ok && analysis.source === "detected" && analysis.confidence === "low") {
+    return (
+      <div className="rounded-xl px-3 py-2 text-[11px] leading-relaxed bg-amber-500/10 text-amber-200">
+        <span className="font-medium">Probably here.</span> {analysis.reason}, but it does not look like clean lettering — check the box on the stage and drag it if it is off.
+      </div>
+    );
+  }
   return (
     <div className={`rounded-xl px-3 py-2 text-[11px] leading-relaxed ${ok ? "bg-emerald-500/10 text-emerald-200" : "bg-amber-500/10 text-amber-200"}`}>
       {ok ? (
         <>
-          <span className="font-medium">Found it.</span> {analysis.reason}
-          {analysis.sibling && <> — compared with <span className="font-mono">{analysis.sibling}</span>{analysis.siblingsUsed > 1 ? ` and ${analysis.siblingsUsed - 1} more` : ""}</>}.
+          <span className="font-medium">{analysis.source === "detected" ? "Found text." : analysis.source === "manual" ? "Using your box." : "Found it."}</span> {analysis.reason}
+          {analysis.source === "diff" && analysis.sibling && <> — compared with <span className="font-mono">{analysis.sibling}</span>{analysis.siblingsUsed > 1 ? ` and ${analysis.siblingsUsed - 1} more` : ""}</>}.
+          {analysis.source === "diff" && frames > 1 && <> Applies to {frames} bitmaps.</>}
+          {analysis.source === "detected" && <> If the box is off, drag it.</>}
         </>
       ) : siblings === 0 ? (
         <>

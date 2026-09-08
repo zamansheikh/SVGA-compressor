@@ -242,7 +242,7 @@ function normalizeSprite(obj: { imageKey?: string; frames?: Frame[] }): Sprite {
   };
 }
 
-function parseSvgPath(d: string): Path2D | null {
+export function parseSvgPath(d: string): Path2D | null {
   try {
     return new Path2D(d);
   } catch {

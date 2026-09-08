@@ -73,13 +73,39 @@ can drag and resize.
 Open a file, type the new text in the *Text* tab. The stage switches to
 *Edited* and updates as you type; *Build result* bakes it into the download.
 
-Where the text lives is *measured*, not guessed. Two kinds of file exist:
+Where the text lives is worked out in three ways, tried in this order:
+
+1. **Comparing siblings.** Load the whole set (level-41 … level-50) and the
+   bitmaps that differ between files are the text. Exact, and the status says
+   *Found it*.
+2. **Reading the frames.** With a single file, a few frames are rendered and
+   scanned for lettering: light strokes with dark edges, sitting on one line,
+   of one height, one colour and one stroke thickness. The sprite that owns
+   those pixels (top-most, clip paths honoured) becomes the target. Layers
+   that carry the same letters — a drop shadow, a glow, a clipped shine sweep,
+   a copy baked into the ribbon — are repainted too, each in its own colour.
+   Clean lettering shows a green *text found here* box; a weaker candidate
+   shows an amber *best guess* box and the status reads *Probably here*.
+3. **A plain guess.** Nothing text-like at all: the box lands where badge
+   text usually is. Drag it.
+
+Two kinds of edit follow:
 
 - **the text is its own bitmap** — a small label sprite placed over the badge.
   It is re-rendered at the same size and swapped. Nothing else changes.
 - **the text is painted into a larger bitmap** — digits baked onto the pill.
-  The digit region is located, the pill is painted back over it, and the new
-  text is drawn on top.
+  The region is painted back over from its surroundings and the new text is
+  drawn on top, in the colour the old text had.
+
+Whatever was found, the box on the stage can be dragged and resized. A box
+moved by hand keeps the companion layers found for that bitmap, so the shadow
+under the new text moves with it.
+
+In a batch of sixteen assets of mixed kinds (role frames, VIP/SVIP badges,
+tags, medals, banners, a chat bubble, a gift) eleven were edited correctly
+without touching the box; the other five needed the box dragged onto the
+text — a tiny label inside an emblem, calligraphic script, a banner whose
+text has no dark edge, and a gift with 3-D digits.
 
 To locate it, drop the file's **siblings** — other files from the same export
 with different text (`level-41.svga` … `level-49.svga` beside `level-50.svga`).

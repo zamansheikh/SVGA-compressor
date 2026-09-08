@@ -115,10 +115,10 @@ export default function Workspace() {
           const g = guessRegion(a.bitmaps, textEdit.target === "auto" ? undefined : textEdit.target);
           if (g) setTextEdit((t) => ({ ...t, target: g.key, region: g.region, regionGuessed: true }));
         }
-        // Siblings arrived after a guess was placed and a diff found the text:
-        // prefer the finding. Only a *diff* counts — the plan that a guessed
-        // region itself produces must not reset the guess, or it loops.
-        if (a.source === "diff" && textEdit.regionGuessed) {
+        // A real finding (a diff, or text detected in a frame) beats a guess
+        // placed earlier. The plan a guessed region itself produces is
+        // "manual", so it never resets the guess — that would loop.
+        if ((a.source === "diff" || a.source === "detected") && textEdit.regionGuessed) {
           setTextEdit((t) => ({ ...t, target: "auto", region: null, regionGuessed: false }));
         }
       })
@@ -225,9 +225,10 @@ export default function Workspace() {
     if (!rect) return null;
     return {
       rect,
-      state: !textEdit.region ? ("detected" as const) : textEdit.regionGuessed ? ("guess" as const) : ("manual" as const),
+      state: !textEdit.region ? (analysis.source === "detected" && analysis.confidence === "low" ? ("guess" as const) : ("detected" as const)) : textEdit.regionGuessed ? ("guess" as const) : ("manual" as const),
       placement: info.placement,
       bitmap: { width: info.width, height: info.height },
+      frame: analysis.detectedOnFrame ?? undefined,
       onChange: (r: Rect) => setTextEdit((t) => ({ ...t, target: key, region: r, regionGuessed: false })),
     };
   }, [textEdit, analysis]);
